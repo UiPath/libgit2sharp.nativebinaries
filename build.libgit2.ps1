@@ -38,6 +38,8 @@ if ($test.IsPresent) { $build_clar = 'ON' }
 $configuration = "RelWithDebInfo"
 if ($debug.IsPresent) { $configuration = "Debug" }
 
+$libopensslDirectory = [IO.Path]::Combine($projectDirectory, "openssl", "build", $configuration)
+
 function Run-Command([scriptblock]$Command, [switch]$Fatal, [switch]$Quiet) {
     $output = ""
     if ($Quiet) {
@@ -93,6 +95,50 @@ function Ensure-Property($expected, $propertyValue, $propertyName, $path) {
     throw "Error: Invalid '$propertyName' property in generated '$path' (Expected: $expected - Actual: $propertyValue)"
 }
 
+function Build-LibSsh($generator, $platform, $buildDir) {
+	
+    cmd.exe /c build.openssl.cmd $configuration $platform
+	
+	Run-Command -Quiet { & remove-item $buildDir -recurse -force }
+	[IO.Directory]::CreateDirectory($buildDir)
+	cd $buildDir
+	Write-Output "CONFIGURE LIBSSH2..."
+	Run-Command -Quiet -Fatal { & $cmake -G $generator -D "CMAKE_BUILD_TYPE=$configuration" -D ENABLE_TRACE=ON -D "BUILD_CLAR=$build_clar" -D "OPENSSL_ROOT_DIR=$libopensslDirectory/$platform" -D "CRYPTO_BACKEND=OpenSSL" -D "BUILD_SHARED_LIBS=1" -D "BUILD_TESTING=OFF" -D "BUILD_EXAMPLES=OFF" $libssh2Directory }
+	Write-Output "BUILD LIBSSH2..."
+	Run-Command -Quiet -Fatal { & $cmake --build . --config $configuration }
+}
+
+function Build-LibGit($generator, $platform, $nugetDir) {
+	Write-Output "Building $platform..."
+	$libsshBuildDir = "$libssh2Directory/build/$platform"
+	$libsshBinDir = "$libsshBuildDir/src/$configuration"
+	$libopensslBinDir = "$libopensslDirectory/$platform/bin"
+	Build-LibSsh $generator $platform $libsshBuildDir
+		
+	$buildDir = [IO.Path]::Combine( $libgit2Directory, "build", $platform)
+	Run-Command -Quiet { & remove-item $buildDir -recurse -force }
+	[IO.Directory]::CreateDirectory($buildDir)
+    cd $buildDir
+	Write-Output "CONFIGURE LIBGIT..."
+	Run-Command -Quiet -Fatal { & $cmake -G $generator -D ENABLE_TRACE=ON -D "BUILD_CLAR=$build_clar" -D "LIBGIT2_FILENAME=$binaryFilename" -D "USE_SSH=False" -D "LIBSSH2_INCLUDE_DIRS=$libssh2Directory/include" -D "LIBSSH2_LIBRARIES=$libsshBinDir/libssh2.lib" -D "LIBSSH2_FOUND=TRUE" -D "OPENSSL_ROOT_DIR=$libopensslDirectory/$platform" $libgit2Directory }
+	Write-Output "BUILD LIBGIT..."
+	Run-Command -Quiet -Fatal { & $cmake --build . --config $configuration }
+    if ($test.IsPresent) { Run-Command -Quiet -Fatal { & $ctest -V . } }
+    cd $configuration
+    Assert-Consistent-Naming "$binaryFilename.dll" "*.dll"
+    Run-Command -Quiet { & rm *.exp }
+    Run-Command -Quiet { & rm $nugetDir\* }
+    Run-Command -Quiet { & mkdir -fo $nugetDir }
+    Run-Command -Quiet -Fatal { & copy -fo * $nugetDir -Exclude *.lib }
+	
+	$opensslPlatformPostfix = ""
+	if ($platform -eq "x64") {
+		$opensslPlatformPostfix = "-x64"
+	}
+	Copy-Item $libsshBinDir/libssh2.dll -Destination $nugetDir -Force
+	Copy-Item $libopensslBinDir/libcrypto-1_1$opensslPlatformPostfix.dll -Destination $nugetDir -Force
+}
+
 function Assert-Consistent-Naming($expected, $path) {
     $dll = get-item $path
 
@@ -106,34 +152,9 @@ try {
 
     $cmake = Find-CMake
     $ctest = Join-Path (Split-Path -Parent $cmake) "ctest.exe"
-
-    Write-Output "Building 32-bit..."
-    Run-Command -Quiet { & remove-item build -recurse -force }
-    Run-Command -Quiet { & mkdir build }
-    cd build
-    Run-Command -Quiet -Fatal { & $cmake -G "Visual Studio $vs" -D ENABLE_TRACE=ON -D "BUILD_CLAR=$build_clar" -D "LIBGIT2_FILENAME=$binaryFilename" -D "EMBED_SSH_PATH=$libssh2Directory" .. }
-    Run-Command -Quiet -Fatal { & $cmake --build . --config $configuration }
-    if ($test.IsPresent) { Run-Command -Quiet -Fatal { & $ctest -V . } }
-    cd $configuration
-    Assert-Consistent-Naming "$binaryFilename.dll" "*.dll"
-    Run-Command -Quiet { & rm *.exp }
-    Run-Command -Quiet { & rm $x86Directory\* }
-    Run-Command -Quiet { & mkdir -fo $x86Directory }
-    Run-Command -Quiet -Fatal { & copy -fo * $x86Directory -Exclude *.lib }
-
-    Write-Output "Building 64-bit..."
-    cd ..
-    Run-Command -Quiet { & mkdir build64 }
-    cd build64
-    Run-Command -Quiet -Fatal { & $cmake -G "Visual Studio $vs Win64" -D THREADSAFE=ON -D ENABLE_TRACE=ON -D "BUILD_CLAR=$build_clar" -D "LIBGIT2_FILENAME=$binaryFilename" -D "EMBED_SSH_PATH=$libssh2Directory" ../.. }
-    Run-Command -Quiet -Fatal { & $cmake --build . --config $configuration }
-    if ($test.IsPresent) { Run-Command -Quiet -Fatal { & $ctest -V . } }
-    cd $configuration
-    Assert-Consistent-Naming "$binaryFilename.dll" "*.dll"
-    Run-Command -Quiet { & rm *.exp }
-    Run-Command -Quiet { & rm $x64Directory\* }
-    Run-Command -Quiet { & mkdir -fo $x64Directory }
-    Run-Command -Quiet -Fatal { & copy -fo * $x64Directory -Exclude *.lib }
+	
+    Build-LibGit "Visual Studio $vs" "x86" $x86Directory
+	Build-LibGit "Visual Studio $vs Win64" "x64" $x64Directory
 
     Write-Output "Done!"
 }

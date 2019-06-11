@@ -1,0 +1,56 @@
+assembly-versioning-scheme: MajorMinorPatchTag
+mode: ContinuousDeployment
+tag-prefix: v20|20|v
+next-version: 0.28.2
+continuous-delivery-fallback-tag: ''
+commit-message-incrementing: Disabled
+branches:
+  develop:
+    mode: ContinuousDeployment
+    tag: alpha
+    increment: Minor
+  master:
+    mode: ContinuousDeployment
+    tag: ''
+    increment: None
+  release:
+    mode: ContinuousDeployment
+    tag: beta
+    increment: None    
+    is-release-branch: true
+  support:
+    mode: ContinuousDeployment
+    tag: beta
+    increment: None
+    is-release-branch: true
+  feature:
+    source-branches: ['master','develop,','release', 'support']
+    mode: ContinuousDeployment
+    tag: useBranchName
+    increment: None
+    is-release-branch: false
+  fix:
+    regex: 'fix[/-]'
+    source-branches: ['master','develop,','release', 'support']
+    mode: ContinuousDeployment
+    tag: useBranchName
+    increment: None
+    is-release-branch: false
+  refactor:
+    regex: 'refactor[/-]'
+    source-branches: ['master','develop,','release', 'support']
+    mode: ContinuousDeployment
+    tag: useBranchName
+    increment: None
+    is-release-branch: false
+  hotfix:
+    mode: ContinuousDeployment
+    tag: useBranchName
+    increment: None
+  pull-request:
+    mode: ContinuousDeployment
+    tag: PullRequest
+    increment: None
+    tag-number-pattern: '[/-](?<number>\d+)[-/]'
+ignore:
+  sha: []
