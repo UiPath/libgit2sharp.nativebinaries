@@ -15,7 +15,7 @@ branches:
     increment: None
   release:
     mode: ContinuousDeployment
-    tag: beta
+    tag: ''
     increment: None    
     is-release-branch: true
   support:

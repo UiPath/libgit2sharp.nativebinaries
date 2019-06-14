@@ -16,5 +16,5 @@ $version = $jsonver.NuGetVersion
 $version
 
 .\build.libgit2.ps1
-.\buildpackage.ps1 "$version-ssh"
+.\buildpackage.ps1 "$version"
 
