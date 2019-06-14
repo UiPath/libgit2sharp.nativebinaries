@@ -97,7 +97,8 @@ function Ensure-Property($expected, $propertyValue, $propertyName, $path) {
 
 function Build-LibSsh($generator, $platform, $buildDir) {
 	
-    cmd.exe /c build.openssl.cmd $configuration $platform
+    cd $projectDirectory
+	cmd.exe /c build.openssl.cmd $configuration $platform
 	
 	Run-Command -Quiet { & remove-item $buildDir -recurse -force }
 	[IO.Directory]::CreateDirectory($buildDir)
