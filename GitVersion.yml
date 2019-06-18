@@ -1,7 +1,7 @@
 assembly-versioning-scheme: MajorMinorPatchTag
 mode: ContinuousDeployment
 tag-prefix: v20|20|v
-next-version: 0.28.2
+next-version: 0.28.3
 continuous-delivery-fallback-tag: ''
 commit-message-incrementing: Disabled
 branches:
