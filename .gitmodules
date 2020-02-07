@@ -1,6 +1,6 @@
 [submodule "libgit2"]
 	path = libgit2
-	url = https://github.com/libgit2/libgit2.git
+	url = https://github.com/UiPath/libgit2.git
 	ignore = untracked
 [submodule "libssh2"]
 	path = libssh2
