@@ -1,13 +1,13 @@
 <#
 .SYNOPSIS
     Builds openssl. Requires: Perl (in path), nmake (14.16.27023).
-    'x86' (default), 'x64'.
+    'Win32' (default), 'x64'.
 .PARAMETER configuration
 	'RelWithDebInfo' (default), 'Debug.
 #>
 Param(
     [string]$configuration = 'RelWithDebInfo',
-	[string]$platform = 'x86'
+	[string]$platform = 'Win32'
 )
 
 $projectDirectory = Split-Path $MyInvocation.MyCommand.Path
@@ -25,7 +25,7 @@ if ($configuration -eq "RelWithDebInfo")
 }
 elseif ($configuration -eq "Debug")
 {
-	if ($platform -eq "x86")
+	if ($platform -eq "Win32")
 	{
 		$vcflags = "debug-VC-WIN32"
 	}
@@ -37,6 +37,7 @@ elseif ($configuration -eq "Debug")
 
 pushd
 cd $libopensslDirectory
+Write-Output "CONFIGURE OPENSSL $configuration $platform $vcflags $buildPath..."
 perl Configure $vcflags --prefix=$buildPath
 nmake clean
 nmake
