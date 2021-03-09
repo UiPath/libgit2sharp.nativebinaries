@@ -126,7 +126,11 @@ function Build-LibGit($generator, $platform, $nugetDir) {
 	Run-Command -Quiet -Fatal { & $cmake --build . --config $configuration }
     if ($test.IsPresent) { Run-Command -Quiet -Fatal { & $ctest -V . } }
     cd $configuration
+
+<#
     Assert-Consistent-Naming "$binaryFilename.dll" "*.dll"
+#>
+
     Run-Command -Quiet { & rm *.exp }
     Run-Command -Quiet { & rm $nugetDir\* }
     Run-Command -Quiet { & mkdir -fo $nugetDir }
