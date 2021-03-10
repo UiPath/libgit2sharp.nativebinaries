@@ -101,7 +101,7 @@ Push-Location $libgit2Directory
 </Project>
 "@
 
-    Set-Content -Encoding UTF8 (Join-Path $projectDirectory "nuget.package\build\LibGit2Sharp.NativeBinaries.props") $buildProperties
+    Set-Content -Encoding UTF8 (Join-Path $projectDirectory "nuget.package\build\LibGit2Sharp.NativeBinaries.UiPath.props") $buildProperties
 
     $net46BuildProperties = @"
 <Project>
@@ -164,7 +164,7 @@ Push-Location $libgit2Directory
 </Project>
 "@
 
-    Set-Content -Encoding UTF8 (Join-Path $projectDirectory "nuget.package\build\net46\LibGit2Sharp.NativeBinaries.props") $net46BuildProperties
+    Set-Content -Encoding UTF8 (Join-Path $projectDirectory "nuget.package\build\net46\LibGit2Sharp.NativeBinaries.UiPath.props") $net46BuildProperties
 
     $dllConfig = @"
 <configuration>
