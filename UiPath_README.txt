@@ -1,4 +1,5 @@
 Prerequisites for building LibGit:
+- Build Tools for Visual Studio 2019, C++ Desktop package
 -	Perl – Any version of ActivePerl or Strawberry Perl. For my installation I used ActivePerl 5.28, x-64). 
 If Perl is installed in a custom folder, be sure that the path to Perl folder is set in PATH environment variable. 
 If not, manually add the path to Perl folder to PATH environment variable.
