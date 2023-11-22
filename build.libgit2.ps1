@@ -158,7 +158,6 @@ try {
     $cmake = Find-CMake
     $ctest = Join-Path (Split-Path -Parent $cmake) "ctest.exe"
 	
-    Build-LibGit "Visual Studio $vs" "Win32" $x86Directory
 	Build-LibGit "Visual Studio $vs" "x64" $x64Directory
 
     Write-Output "Done!"
