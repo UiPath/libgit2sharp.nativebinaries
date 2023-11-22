@@ -1,17 +1,16 @@
 ﻿<Project>
   <PropertyGroup>
     <MSBuildAllProjects>$(MSBuildAllProjects);$(MSBuildThisFileFullPath)</MSBuildAllProjects>
-    <libgit2_propsfile>$(MSBuildThisFileFullPath)</libgit2_propsfile>
-    <libgit2_hash>572e4d8c1f1d42feac1c770f0cddf6fda6c4eca0</libgit2_hash>
-    <libgit2_filename>git2-572e4d8</libgit2_filename>
+    <liblibgit2_propsfile>$(MSBuildThisFileFullPath)</liblibgit2_propsfile>
+    <liblibgit2_filename>libgit2</liblibgit2_filename>
   </PropertyGroup>
   <ItemGroup>
-    <ContentWithTargetPath Condition="Exists('$(MSBuildThisFileDirectory)\..\..\runtimes\win-x64\native\git2-572e4d8.dll')" Include="$(MSBuildThisFileDirectory)\..\..\runtimes\win-x64\native\git2-572e4d8.dll">
-      <TargetPath>lib\win32\x64\git2-572e4d8.dll</TargetPath>
+    <ContentWithTargetPath Condition="Exists('$(MSBuildThisFileDirectory)\..\..\runtimes\win-x64\native\libgit2.dll')" Include="$(MSBuildThisFileDirectory)\..\..\runtimes\win-x64\native\libgit2.dll">
+      <TargetPath>lib\win32\x64\libgit2.dll</TargetPath>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </ContentWithTargetPath>
-    <ContentWithTargetPath Condition="Exists('$(MSBuildThisFileDirectory)\..\..\runtimes\win-x64\native\git2-572e4d8.pdb')" Include="$(MSBuildThisFileDirectory)\..\..\runtimes\win-x64\native\git2-572e4d8.pdb">
-      <TargetPath>lib\win32\x64\git2-572e4d8.pdb</TargetPath>
+	<ContentWithTargetPath Condition="Exists('$(MSBuildThisFileDirectory)\..\..\runtimes\win-x64\native\libgit2_schannel.dll')" Include="$(MSBuildThisFileDirectory)\..\..\runtimes\win-x64\native\libgit2_schannel.dll">
+      <TargetPath>lib\win32\x64\libgit2_schannel.dll</TargetPath>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </ContentWithTargetPath>
 	<ContentWithTargetPath Condition="Exists('$(MSBuildThisFileDirectory)\..\..\runtimes\win-x64\native\libssh2.dll')" Include="$(MSBuildThisFileDirectory)\..\..\runtimes\win-x64\native\libssh2.dll">
@@ -22,5 +21,4 @@
       <TargetPath>lib\win32\x64\libcrypto-1_1-x64.dll</TargetPath>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </ContentWithTargetPath>
-  </ItemGroup>
 </Project>

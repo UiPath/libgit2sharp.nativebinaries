@@ -24,12 +24,11 @@ $libssh2Directory = ([System.Uri](Join-Path $projectDirectory "libssh2")).Absolu
 $x86Directory = Join-Path $projectDirectory "nuget.package\runtimes\win-x86\native"
 $x64Directory = Join-Path $projectDirectory "nuget.package\runtimes\win-x64\native"
 $hashFile = Join-Path $projectDirectory "nuget.package\libgit2\libgit2_hash.txt"
-$sha = Get-Content $hashFile 
 
 if (![string]::IsNullOrEmpty($libgit2Name)) {
     $binaryFilename = $libgit2Name
 } else {
-    $binaryFilename = "git2-" + $sha.Substring(0,7)
+    $binaryFilename = "libgit2"
 }
 
 $build_clar = 'OFF'
@@ -109,19 +108,29 @@ function Build-LibSsh($generator, $platform, $buildDir) {
 	Run-Command -Quiet -Fatal { & $cmake --build . --config $configuration }
 }
 
-function Build-LibGit($generator, $platform, $nugetDir) {
-	Write-Output "Building $platform..."
+function Build-LibGit($generator, $platform, $nugetDir, $useSchannel, $buildPlatform) {
 	$libsshBuildDir = "$libssh2Directory/build/$platform"
 	$libsshBinDir = "$libsshBuildDir/src/$configuration"
 	$libopensslBinDir = "$libopensslDirectory/$platform/bin"
-	Build-LibSsh $generator $platform $libsshBuildDir
-		
+    if ($buildPlatform) {
+        Write-Output "Building $platform..."
+        Build-LibSsh $generator $platform $libsshBuildDir
+    }
+
 	$buildDir = [IO.Path]::Combine( $libgit2Directory, "build", $platform)
 	Run-Command -Quiet { & remove-item $buildDir -recurse -force }
 	[IO.Directory]::CreateDirectory($buildDir)
     cd $buildDir
-	Write-Output "CONFIGURE LIBGIT..."
-	Run-Command -Quiet -Fatal { & $cmake -G $generator -A $platform -D ENABLE_TRACE=ON -D "BUILD_CLAR=$build_clar" -D "LIBGIT2_FILENAME=$binaryFilename" -D "USE_SSH=False" -D "LIBSSH2_INCLUDE_DIRS=$libssh2Directory/include" -D "LIBSSH2_LIBRARIES=$libsshBinDir/libssh2.lib" -D "LIBSSH2_FOUND=TRUE" -D "OPENSSL_ROOT_DIR=$libopensslDirectory/$platform" $libgit2Directory }
+    $variantFilename = $binaryFileName
+    if ($useSchannel) {
+        $variantFilename = -join ($binaryFileName, "_schannel")
+    }
+	Write-Output "CONFIGURE LIBGIT... Schannel: $useSchannel"
+    $httpsConfig = ""
+    if ($useSchannel) {
+        $httpsConfig = "-D `"USE_HTTPS=Schannel`""
+    }
+	Run-Command -Fatal { & $cmake -G $generator -A $platform -D ENABLE_TRACE=ON -D "BUILD_CLAR=$build_clar" -D "BUILD_TESTS=OFF" -D "BUILD_CLI=OFF" $httpsConfig -D "LIBGIT2_FILENAME=$variantFilename" -D "USE_SSH=False" -D "LIBSSH2_INCLUDE_DIRS=$libssh2Directory/include" -D "LIBSSH2_LIBRARIES=$libsshBinDir/libssh2.lib" -D "LIBSSH2_FOUND=TRUE" -D "OPENSSL_ROOT_DIR=$libopensslDirectory/$platform" $libgit2Directory }
 	Write-Output "BUILD LIBGIT..."
 	Run-Command -Quiet -Fatal { & $cmake --build . --config $configuration }
     if ($test.IsPresent) { Run-Command -Quiet -Fatal { & $ctest -V . } }
@@ -158,7 +167,8 @@ try {
     $cmake = Find-CMake
     $ctest = Join-Path (Split-Path -Parent $cmake) "ctest.exe"
 	
-	Build-LibGit "Visual Studio $vs" "x64" $x64Directory
+	Build-LibGit "Visual Studio $vs" "x64" $x64Directory $false $true
+	Build-LibGit "Visual Studio $vs" "x64" $x64Directory $true $false
 
     Write-Output "Done!"
 }
