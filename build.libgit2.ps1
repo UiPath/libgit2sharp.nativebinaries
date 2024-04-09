@@ -126,7 +126,7 @@ function Build-LibGit($generator, $platform, $nugetDir, $useSchannel, $buildPlat
         $variantFilename = -join ($binaryFileName, "_schannel")
     }
 	Write-Output "CONFIGURE LIBGIT... Schannel: $useSchannel"
-    $httpsConfig = ""
+    $httpsConfig = "WinHTTP"
     if ($useSchannel) {
         $httpsConfig = "-D `"USE_HTTPS=Schannel`""
     }
