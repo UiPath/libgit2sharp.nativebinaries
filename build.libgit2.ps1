@@ -150,7 +150,7 @@ function Build-LibGit($generator, $platform, $nugetDir, $useSchannel, $buildPlat
 		$opensslPlatformPostfix = "-x64"
 	}
 	Copy-Item $libsshBinDir/libssh2.dll -Destination $nugetDir -Force
-	Copy-Item $libopensslBinDir/libcrypto-1_1$opensslPlatformPostfix.dll -Destination $nugetDir -Force
+	Copy-Item $libopensslBinDir/libcrypto-3$opensslPlatformPostfix.dll -Destination $nugetDir -Force
 }
 
 function Assert-Consistent-Naming($expected, $path) {

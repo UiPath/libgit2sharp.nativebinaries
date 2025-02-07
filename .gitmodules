@@ -1,6 +1,6 @@
 [submodule "libgit2"]
 	path = libgit2
-	url = git@github.com:UiPath/libgit2.git
+	url = https://github.com/UiPath/libgit2.git
 	ignore = untracked
 [submodule "libssh2"]
 	path = libssh2
@@ -8,6 +8,6 @@
 	ignore = untracked
 [submodule "openssl"]
 	path = openssl
-	url = git://git.openssl.org/openssl.git
+	url = https://github.com/openssl/openssl.git
 	branch = OpenSSL_1_1_1-stable
 	ignore = untracked
