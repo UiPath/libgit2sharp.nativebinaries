@@ -108,10 +108,14 @@ function Build-LibSsh($generator, $platform, $buildDir) {
 	Run-Command -Quiet -Fatal { & $cmake --build . --config $configuration }
 }
 
-function Build-LibGit($generator, $platform, $nugetDir, $useSchannel, $buildPlatform) {
+function Build-LibGit($generator, $platform, $nugetDir, $useSchannel, $useSshExe, $buildPlatform) {
 	$libsshBuildDir = "$libssh2Directory/build/$platform"
 	$libsshBinDir = "$libsshBuildDir/src/$configuration"
 	$libopensslBinDir = "$libopensslDirectory/$platform/bin"
+	$sshMethod = "libssh2"
+	if ($useSshExe) {
+		$sshMethod = "exec"
+	}
     if ($buildPlatform) {
         Write-Output "Building $platform..."
         Build-LibSsh $generator $platform $libsshBuildDir
@@ -123,14 +127,17 @@ function Build-LibGit($generator, $platform, $nugetDir, $useSchannel, $buildPlat
     cd $buildDir
     $variantFilename = $binaryFileName
     if ($useSchannel) {
-        $variantFilename = -join ($binaryFileName, "_schannel")
+        $variantFilename = -join ($variantFilename, "_schannel")
+    }
+	if ($useSshExe) {
+        $variantFilename = -join ($variantFilename, "_ssh")
     }
 	Write-Output "CONFIGURE LIBGIT... Schannel: $useSchannel"
     $httpsConfig = "WinHTTP"
     if ($useSchannel) {
         $httpsConfig = "-D `"USE_HTTPS=Schannel`""
     }
-	Run-Command -Fatal { & $cmake -G $generator -A $platform -D ENABLE_TRACE=ON -D "BUILD_CLAR=$build_clar" -D "BUILD_TESTS=OFF" -D "BUILD_CLI=OFF" $httpsConfig -D "LIBGIT2_FILENAME=$variantFilename" -D "USE_SSH=False" -D "LIBSSH2_INCLUDE_DIRS=$libssh2Directory/include" -D "LIBSSH2_LIBRARIES=$libsshBinDir/libssh2.lib" -D "LIBSSH2_FOUND=TRUE" -D "OPENSSL_ROOT_DIR=$libopensslDirectory/$platform" $libgit2Directory }
+	Run-Command -Fatal { & $cmake -G $generator -A $platform -D ENABLE_TRACE=ON -D "BUILD_CLAR=$build_clar" -D "BUILD_TESTS=OFF" -D "BUILD_CLI=OFF" $httpsConfig -D "LIBGIT2_FILENAME=$variantFilename" -D "USE_SSH=$sshMethod" -D "LIBSSH2_INCLUDE_DIRS=$libssh2Directory/include" -D "LIBSSH2_LIBRARIES=$libsshBinDir/libssh2.lib" -D "LIBSSH2_FOUND=TRUE" -D "OPENSSL_ROOT_DIR=$libopensslDirectory/$platform" $libgit2Directory }
 	Write-Output "BUILD LIBGIT..."
 	Run-Command -Quiet -Fatal { & $cmake --build . --config $configuration }
     if ($test.IsPresent) { Run-Command -Quiet -Fatal { & $ctest -V . } }
@@ -167,9 +174,11 @@ try {
     $cmake = Find-CMake
     $ctest = Join-Path (Split-Path -Parent $cmake) "ctest.exe"
 	
-	Build-LibGit "Visual Studio $vs" "x64" $x64Directory $false $true
-	Build-LibGit "Visual Studio $vs" "x64" $x64Directory $true $false
-
+	Build-LibGit "Visual Studio $vs" "x64" $x64Directory $false $false $true
+	Build-LibGit "Visual Studio $vs" "x64" $x64Directory $true $false $false
+	Build-LibGit "Visual Studio $vs" "x64" $x64Directory $false $true $false	
+	Build-LibGit "Visual Studio $vs" "x64" $x64Directory $true $true $false
+	
     Write-Output "Done!"
 }
 finally {
