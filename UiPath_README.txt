@@ -21,3 +21,12 @@ If you manage to build OpenSSL but have some other errors later in the build, be
 
 Versioning: 
 The version of the package is determined by the `libgit2` version, so for example if we are using libgit2 v1.7.1, this package will be libgit2 v1.7.1-v1, where v1 is our own version number. 
+
+Using WinGet to install dependencies:
+
+winget install -e --id Microsoft.VisualStudio.2019.BuildTools --override "--passive --wait --add Microsoft.VisualStudio.Workload.VCTools;includeRecommended"
+winget install --id=StrawberryPerl.StrawberryPerl  -e
+winget install --id=Kitware.CMake  -e
+winget install --id=NASM.NASM  -e
+
+You can check that the c++ build tools were installed in the Visual Studio Installer, check Visual Studio Build Tools 2019 -> modify -> c++ desktop development should be checked
