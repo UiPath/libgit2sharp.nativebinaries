@@ -137,7 +137,7 @@ function Build-LibGit($generator, $platform, $nugetDir, $useSchannel, $useSshExe
     if ($useSchannel) {
         $httpsConfig = "-D `"USE_HTTPS=Schannel`""
     }
-	Run-Command -Fatal { & $cmake -G $generator -A $platform -D ENABLE_TRACE=ON -D "BUILD_CLAR=$build_clar" -D "BUILD_TESTS=OFF" -D "BUILD_CLI=OFF" $httpsConfig -D "LIBGIT2_FILENAME=$variantFilename" -D "USE_SSH=$sshMethod" -D "LIBSSH2_INCLUDE_DIRS=$libssh2Directory/include" -D "LIBSSH2_LIBRARIES=$libsshBinDir/libssh2.lib" -D "LIBSSH2_FOUND=TRUE" -D "OPENSSL_ROOT_DIR=$libopensslDirectory/$platform" $libgit2Directory }
+	Run-Command -Fatal { & $cmake -G $generator -A $platform -D ENABLE_TRACE=ON -D "BUILD_CLAR=$build_clar" -D "BUILD_TESTS=OFF" -D "BUILD_CLI=OFF" $httpsConfig -D "LIBGIT2_FILENAME=$variantFilename" -D "USE_SSH=$sshMethod" -D "USE_BUNDLED_ZLIB=ON" -D "LIBSSH2_INCLUDE_DIRS=$libssh2Directory/include" -D "LIBSSH2_LIBRARIES=$libsshBinDir/libssh2.lib" -D "LIBSSH2_FOUND=TRUE" -D "OPENSSL_ROOT_DIR=$libopensslDirectory/$platform" $libgit2Directory }
 	Write-Output "BUILD LIBGIT..."
 	Run-Command -Quiet -Fatal { & $cmake --build . --config $configuration }
     if ($test.IsPresent) { Run-Command -Quiet -Fatal { & $ctest -V . } }
