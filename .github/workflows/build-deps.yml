@@ -35,10 +35,14 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - name: Checkout (with submodules)
+      - name: Checkout
         uses: actions/checkout@v4
-        with:
-          submodules: recursive
+
+      - name: Init deps submodules (openssl + libssh2 only)
+        shell: bash
+        # Only these two are needed to pin/verify versions; the libgit2 submodule is not required
+        # here (and may be private), so avoid `submodules: recursive`.
+        run: git submodule update --init --depth 1 openssl libssh2
 
       - name: Build dependencies with vcpkg
         id: build

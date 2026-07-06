@@ -32,15 +32,38 @@ $installRoot = Join-Path $depsDirectory 'vcpkg_installed'
 $stagingRoot = Join-Path $depsDirectory ('_staging/' + $Platform)
 $archivePath = Join-Path $depsDirectory ('_staging/deps-' + $Platform + '.zip')
 
-function Get-SubmoduleVersion($submodule) {
-    # Turns e.g. "openssl-3.6.3" / "libssh2-1.11.1" into "3.6.3" / "1.11.1".
-    $describe = (& git -C (Join-Path $projectDirectory $submodule) describe --tags 2>$null)
-    if (-not $describe) { throw "Could not 'git describe' submodule '$submodule'. Is it checked out?" }
-    return ($describe -replace '^[a-zA-Z]+-', '').Trim()
+function Get-OpensslSubmoduleVersion {
+    # OpenSSL's exact version lives in VERSION.dat (no git tags needed).
+    $verFile = Join-Path $projectDirectory 'openssl/VERSION.dat'
+    if (-not (Test-Path $verFile)) { throw "openssl submodule not checked out ($verFile missing)." }
+    $data = @{}
+    foreach ($line in Get-Content $verFile) {
+        if ($line -match '^\s*(\w+)\s*=\s*(.*?)\s*$') { $data[$Matches[1]] = $Matches[2] }
+    }
+    return "$($data.MAJOR).$($data.MINOR).$($data.PATCH)"
+}
+
+function Get-Libssh2SubmoduleVersion {
+    # libssh2's header keeps a "_DEV" suffix even on the release tag, so derive from the tag instead.
+    # The submodule may be a shallow checkout without tag refs, so fetch its (small) tag set first.
+    $dir = Join-Path $projectDirectory 'libssh2'
+    if (-not (Test-Path (Join-Path $dir '.git'))) { throw "libssh2 submodule not checked out." }
+    & git -C $dir fetch --tags --quiet origin 2>$null
+    $describe = (& git -C $dir describe --tags --exact-match 2>$null)
+    if (-not $describe) { throw "Could not resolve libssh2 version from git tags." }
+    return ($describe -replace '^libssh2-', '').Trim()
 }
 
 function Get-SubmoduleSha($submodule) {
-    return (& git -C (Join-Path $projectDirectory $submodule) rev-parse HEAD).Trim()
+    $dir = Join-Path $projectDirectory $submodule
+    if (-not (Test-Path (Join-Path $dir '.git'))) { return 'unknown' }
+    return (& git -C $dir rev-parse HEAD).Trim()
+}
+
+function Get-OverrideVersion($name) {
+    $o = $manifest.overrides | Where-Object { $_.name -eq $name } | Select-Object -First 1
+    if (-not $o) { throw "deps/vcpkg.json has no override for '$name'." }
+    return "$($o.version)"
 }
 
 # --- Resolve vcpkg ------------------------------------------------------------
@@ -74,9 +97,9 @@ Write-Host "==> vcpkg install (triplet=$Triplet) from $manifestPath"
     --clean-after-build
 if ($LASTEXITCODE -ne 0) { throw "vcpkg install failed with exit code $LASTEXITCODE." }
 
-# --- Assert versions match the submodule pins ---------------------------------
-$expectedOpenssl = Get-SubmoduleVersion 'openssl'
-$expectedLibssh2 = Get-SubmoduleVersion 'libssh2'
+# --- Assert versions: submodule pin == deps/vcpkg.json override == what vcpkg built -----------
+$expectedOpenssl = Get-OpensslSubmoduleVersion
+$expectedLibssh2 = Get-Libssh2SubmoduleVersion
 
 $listing = & $vcpkg list --x-install-root=$installRoot
 function Get-InstalledVersion($package) {
@@ -90,16 +113,18 @@ function Get-InstalledVersion($package) {
 $installedOpenssl = Get-InstalledVersion 'openssl'
 $installedLibssh2 = Get-InstalledVersion 'libssh2'
 
-Write-Host "openssl : submodule=$expectedOpenssl  vcpkg=$installedOpenssl"
-Write-Host "libssh2 : submodule=$expectedLibssh2  vcpkg=$installedLibssh2"
-if ($installedOpenssl -ne $expectedOpenssl) {
-    throw "OpenSSL version mismatch: submodule pins $expectedOpenssl but vcpkg built $installedOpenssl. " +
-          "Update deps/vcpkg.json override (and ensure the version exists in vcpkg's registry)."
+function Assert-Version($name, $submodule, $override, $installed) {
+    Write-Host "${name} : submodule=$submodule  override=$override  vcpkg=$installed"
+    if ($submodule -ne $override) {
+        throw "${name}: submodule pins $submodule but deps/vcpkg.json override is $override. Keep them in sync."
+    }
+    if ($installed -ne $submodule) {
+        throw "${name}: vcpkg built $installed but the pin is $submodule. " +
+              "Update the deps/vcpkg.json override to a version present in vcpkg's registry, and bump the submodule to match."
+    }
 }
-if ($installedLibssh2 -ne $expectedLibssh2) {
-    throw "libssh2 version mismatch: submodule pins $expectedLibssh2 but vcpkg built $installedLibssh2. " +
-          "Update deps/vcpkg.json override."
-}
+Assert-Version 'openssl' $expectedOpenssl (Get-OverrideVersion 'openssl') $installedOpenssl
+Assert-Version 'libssh2' $expectedLibssh2 (Get-OverrideVersion 'libssh2') $installedLibssh2
 
 # --- Stage the archive --------------------------------------------------------
 $tripletDir = Join-Path $installRoot $Triplet
