@@ -99,6 +99,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # MinVer needs full history + tags to compute the version
 
       - name: Download all native binaries
         uses: actions/download-artifact@v4
@@ -119,18 +121,32 @@ jobs:
           echo "=== assembled runtimes tree ==="
           find nuget.package/runtimes -type f | sort
 
+      - name: Resolve version (MinVer)
+        id: ver
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          dotnet tool install --global minver-cli --version 4.3.0 *> $null
+          $env:PATH += ";$env:USERPROFILE\.dotnet\tools"
+          # Empty tag prefix + preview.0 identifiers: same MinVer scheme as the managed LibGit2Sharp
+          # repo, so both are driven by the same X.Y.Z-vN tags (e.g. a "1.9.1-v5" tag -> 1.9.1-v5).
+          $version = (minver --default-pre-release-identifiers preview.0).Trim()
+          if ($LASTEXITCODE) { throw "minver failed ($LASTEXITCODE)" }
+          # NuGet package versions carry no build metadata; drop anything after '+'.
+          $version = $version.Split('+')[0]
+          Write-Host "Resolved version: $version"
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
       - name: Pack multi-RID NuGet
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Continue'
-          # TODO: replace the placeholder version with minver-cli (git-tag driven, matching the
-          # managed LibGit2Sharp repo's MinVer scheme).
-          ./buildpackage.ps1 -version '0.0.0-ci${{ github.run_number }}'
+          ./buildpackage.ps1 -version '${{ steps.ver.outputs.version }}'
           if ($LASTEXITCODE) { throw "buildpackage.ps1 failed ($LASTEXITCODE)" }
 
       - name: Upload NuGet package
         uses: actions/upload-artifact@v4
         with:
           name: nupkg
-          path: LibGit2Sharp.NativeBinaries.UiPath.0.0.0-ci${{ github.run_number }}.nupkg
+          path: LibGit2Sharp.NativeBinaries.UiPath.${{ steps.ver.outputs.version }}.nupkg
           if-no-files-found: error
