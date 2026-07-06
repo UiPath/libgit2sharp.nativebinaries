@@ -6,23 +6,12 @@ name: build-deps
 #
 # Run manually after bumping the openssl/libssh2 submodules (and deps/vcpkg.json to match).
 on:
-  # Manual only. NOTE: workflow_dispatch needs this file on the default branch (develop) to be
+  # Manual only. workflow_dispatch needs this file on the default branch (develop) to be
   # dispatchable from the Actions UI. Run after bumping the openssl/libssh2 submodules and
-  # deps/vcpkg.json, then copy the printed SHA256 into deps.lock.json.
+  # deps/vcpkg.json, then copy the printed SHA256 into deps.lock.json. Deliberately NOT triggered on
+  # push: a rebuild would republish the release archives with fresh (non-reproducible) SHA256s and
+  # break the pinned deps.lock.json.
   workflow_dispatch:
-  # TEMPORARY push trigger while iterating on the feature branch (workflow_dispatch isn't reachable
-  # until this file is on the default branch). REMOVE before merging to develop: on develop this
-  # workflow must stay manual so it doesn't republish the pinned deps release on every push.
-  push:
-    branches:
-      - feature/ab/pipeline_iter_1
-    paths:
-      - deps/**
-      - build.deps.ps1
-      - .github/workflows/build-deps.yml
-      - openssl
-      - libssh2
-      - .gitmodules
 
 permissions:
   contents: write
