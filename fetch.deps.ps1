@@ -18,6 +18,9 @@ Param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+# tar extraction below checks $LASTEXITCODE itself; don't let a non-zero exit auto-throw first
+# (PowerShell 7.4+ defaults this to $true). Harmless no-op on Windows PowerShell 5.1.
+$PSNativeCommandUseErrorActionPreference = $false
 
 $projectDirectory = Split-Path $MyInvocation.MyCommand.Path
 $lockPath = Join-Path $projectDirectory 'deps.lock.json'
@@ -90,7 +93,14 @@ Write-Host "==> SHA256 verified: $actualSha"
 
 if (Test-Path $targetDir) { Remove-Item $targetDir -Recurse -Force }
 New-Item -ItemType Directory -Path $targetDir | Out-Null
-Expand-Archive -Path $archive -DestinationPath $targetDir -Force
+if ($entry.filename -match '\.(tar\.gz|tgz)$') {
+    # posix archives are tar.gz so shared-lib symlinks + exec bits survive; tar is present on all
+    # posix hosts and on modern Windows.
+    & tar -xzf $archive -C $targetDir
+    if ($LASTEXITCODE -ne 0) { throw "tar extraction failed ($LASTEXITCODE) for '$archive'." }
+} else {
+    Expand-Archive -Path $archive -DestinationPath $targetDir -Force
+}
 Write-Host "==> Extracted to '$targetDir'"
 
 return $targetDir

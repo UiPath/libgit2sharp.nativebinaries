@@ -67,6 +67,32 @@ jobs:
         # here (and may be private), so avoid `submodules: recursive`.
         run: git submodule update --init --depth 1 openssl libssh2
 
+      - name: Ensure vcpkg
+        shell: pwsh
+        # windows-latest/ubuntu-latest ship vcpkg preinstalled (VCPKG_INSTALLATION_ROOT), but the
+        # newer arm runners (and some images) do not. Clone + bootstrap our own when it's missing so
+        # every leg is self-sufficient. build.deps.ps1 then fetches the pinned baseline as needed.
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $false
+          $isWin = $IsWindows -or ($null -eq $IsWindows)
+          $exe = if ($isWin) { 'vcpkg.exe' } else { 'vcpkg' }
+          $root = $env:VCPKG_INSTALLATION_ROOT
+          if ($root -and (Test-Path (Join-Path $root $exe))) {
+            Write-Host "Using preinstalled vcpkg at $root"
+          } else {
+            $root = Join-Path $env:RUNNER_TEMP 'vcpkg'
+            Write-Host "No preinstalled vcpkg found; cloning to $root"
+            # Blobless clone keeps full commit history (so the pinned baseline is reachable) without
+            # downloading every blob.
+            git clone --filter=blob:none https://github.com/microsoft/vcpkg $root
+            if ($LASTEXITCODE) { throw "vcpkg clone failed ($LASTEXITCODE)." }
+            $bootstrap = Join-Path $root ($isWin ? 'bootstrap-vcpkg.bat' : 'bootstrap-vcpkg.sh')
+            & $bootstrap -disableMetrics
+            if ($LASTEXITCODE) { throw "vcpkg bootstrap failed ($LASTEXITCODE)." }
+          }
+          "VCPKG_ROOT=$root" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
       - name: Build dependencies with vcpkg
         id: build
         shell: pwsh
