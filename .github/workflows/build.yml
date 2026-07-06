@@ -1,10 +1,17 @@
 name: build
 
 # Builds libgit2 from the submodule against the prebuilt OpenSSL + libssh2 deps (fetched and
-# SHA256-verified from deps.lock.json - no OpenSSL/libssh2 compilation here) and packs the
-# LibGit2Sharp.NativeBinaries.UiPath NuGet, uploaded as a build artifact.
+# SHA256-verified from deps.lock.json - no OpenSSL/libssh2 compilation here) and assembles the
+# multi-RID native payload into a single archive (natives-<version>.zip + SHA256). The managed
+# LibGit2Sharp repo consumes this archive directly (no separate NativeBinaries nupkg); on develop
+# (or workflow_dispatch with publish=true) the archive is published as a durable GitHub Release.
 on:
   workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Publish the native archive as a GitHub Release (auto-true on develop)'
+        type: boolean
+        default: false
   # Temporary push trigger while this workflow lives only on a feature branch. Remove once merged.
   push:
     branches:
@@ -93,9 +100,11 @@ jobs:
           path: nuget.package/runtimes/${{ matrix.platform }}/native/*
           if-no-files-found: error
 
-  pack:
+  package:
     needs: build
-    runs-on: windows-2022   # nuget.exe Pack (buildpackage.ps1) is Windows-only
+    runs-on: windows-2022
+    permissions:
+      contents: write   # publish the native archive as a GitHub Release (when the flag / develop gate opens)
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -111,7 +120,7 @@ jobs:
       - name: Assemble runtimes tree
         shell: bash
         # download-artifact drops each artifact under _natives/native-<rid>/; place each RID's files
-        # back at nuget.package/runtimes/<rid>/native/ so nuget pack picks them all up.
+        # back at nuget.package/runtimes/<rid>/native/ so the archive carries the full multi-RID tree.
         run: |
           for d in _natives/native-*; do
             rid="${d#_natives/native-}"
@@ -132,21 +141,62 @@ jobs:
           # repo, so both are driven by the same X.Y.Z-vN tags (e.g. a "1.9.1-v5" tag -> 1.9.1-v5).
           $version = (minver --default-pre-release-identifiers preview.0).Trim()
           if ($LASTEXITCODE) { throw "minver failed ($LASTEXITCODE)" }
-          # NuGet package versions carry no build metadata; drop anything after '+'.
+          # Version strings carry no build metadata in the archive/tag name; drop anything after '+'.
           $version = $version.Split('+')[0]
           Write-Host "Resolved version: $version"
           "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
-      - name: Pack multi-RID NuGet
+      - name: Assemble native archive
+        id: zip
         shell: pwsh
         run: |
-          $ErrorActionPreference = 'Continue'
-          ./buildpackage.ps1 -version '${{ steps.ver.outputs.version }}'
-          if ($LASTEXITCODE) { throw "buildpackage.ps1 failed ($LASTEXITCODE)" }
+          $ErrorActionPreference = 'Stop'
+          $version = '${{ steps.ver.outputs.version }}'
+          $staging = Join-Path $env:RUNNER_TEMP 'natives'
+          if (Test-Path $staging) { Remove-Item $staging -Recurse -Force }
+          # The archive carries the full package payload (runtimes + build props + libgit2 metadata),
+          # so the managed LibGit2Sharp repo can lay it straight into its own package. Drop the nuspec
+          # (this repo's nuget-pack metadata) and any .pdb.
+          Copy-Item nuget.package $staging -Recurse
+          Remove-Item (Join-Path $staging 'NativeBinaries.nuspec') -Force -ErrorAction SilentlyContinue
+          Get-ChildItem $staging -Recurse -Filter *.pdb | Remove-Item -Force
+          $zip = "natives-$version.zip"
+          if (Test-Path $zip) { Remove-Item $zip -Force }
+          Compress-Archive -Path (Join-Path $staging '*') -DestinationPath $zip
+          $sha = (Get-FileHash -Algorithm SHA256 -Path $zip).Hash.ToLower()
+          "$sha  $zip" | Out-File -FilePath "$zip.sha256" -Encoding ascii
+          Write-Host "Built $zip"
+          Write-Host "SHA256: $sha"
+          "zip=$zip"      | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "sha256=$sha"   | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "tag=natives-$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
-      - name: Upload NuGet package
+      - name: Upload native archive artifact
         uses: actions/upload-artifact@v4
         with:
-          name: nupkg
-          path: LibGit2Sharp.NativeBinaries.UiPath.${{ steps.ver.outputs.version }}.nupkg
+          name: natives
+          path: |
+            ${{ steps.zip.outputs.zip }}
+            ${{ steps.zip.outputs.zip }}.sha256
           if-no-files-found: error
+
+      - name: Publish to GitHub Release
+        # Flag-gated: a durable release is published only when explicitly requested (workflow_dispatch
+        # publish=true) or on develop. PR/branch runs produce the workflow artifact above and nothing
+        # more, so they never mint stray releases.
+        if: ${{ inputs.publish || github.ref == 'refs/heads/develop' }}
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $PSNativeCommandUseErrorActionPreference = $false
+          $tag = '${{ steps.zip.outputs.tag }}'
+          $zip = '${{ steps.zip.outputs.zip }}'
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag --title $tag --notes "Prebuilt LibGit2Sharp native binaries (all RIDs). Consumed directly by the managed LibGit2Sharp package via natives.lock.json; SHA256 sidecar accompanies the archive."
+          }
+          gh release upload $tag $zip "$zip.sha256" --clobber
+          if ($LASTEXITCODE -ne 0) { throw "gh release upload failed ($LASTEXITCODE)" }
+          Write-Host "Published $zip to release $tag (SHA256 ${{ steps.zip.outputs.sha256 }})"
