@@ -28,8 +28,10 @@ jobs:
       matrix:
         include:
           # win-x64 first; other platforms are added here later.
+          # Pin windows-2022 so the "Visual Studio 17 2022" cmake generator matches the runner's VS
+          # (windows-latest has moved past VS 2022).
           - platform: win-x64
-            os: windows-latest
+            os: windows-2022
             vs: "17 2022"
     runs-on: ${{ matrix.os }}
     steps:
