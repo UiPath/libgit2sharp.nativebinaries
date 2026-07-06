@@ -1,0 +1,64 @@
+name: build
+
+# Builds libgit2 from the submodule against the prebuilt OpenSSL + libssh2 deps (fetched and
+# SHA256-verified from deps.lock.json - no OpenSSL/libssh2 compilation here) and packs the
+# LibGit2Sharp.NativeBinaries.UiPath NuGet, uploaded as a build artifact.
+on:
+  workflow_dispatch:
+  # Temporary push trigger while this workflow lives only on a feature branch. Remove once merged.
+  push:
+    branches:
+      - feature/ab/pipeline_iter_1
+    paths:
+      - libgit2
+      - build.libgit2.ps1
+      - buildpackage.ps1
+      - fetch.deps.ps1
+      - deps.lock.json
+      - nuget.package/**
+      - .github/workflows/build.yml
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # win-x64 first; other platforms are added here later.
+          - platform: win-x64
+            os: windows-latest
+            vs: "17 2022"
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Checkout libgit2 submodule (deploy key over SSH)
+        shell: bash
+        env:
+          DEPLOY_KEY: ${{ secrets.LIBGIT2_DEPLOY_KEY }}
+        run: |
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$DEPLOY_KEY" > "$HOME/.ssh/libgit2_deploy"
+          chmod 600 "$HOME/.ssh/libgit2_deploy"
+          export GIT_SSH_COMMAND="ssh -i $HOME/.ssh/libgit2_deploy -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
+          # Scoped SSH rewrite so .gitmodules stays HTTPS (local devs unaffected); only the internal
+          # libgit2 repo is cloned via the deploy key.
+          git config --global url."git@github.com:UiPath/libgit2.git".insteadOf "https://github.com/UiPath/libgit2.git"
+          git submodule update --init libgit2
+
+      - name: Build libgit2 and pack NuGet
+        shell: pwsh
+        run: |
+          ./build.libgit2.ps1 -vs '${{ matrix.vs }}'
+          ./buildpackage.ps1 -version '0.0.0-ci${{ github.run_number }}'
+
+      - name: Upload NuGet package
+        uses: actions/upload-artifact@v4
+        with:
+          name: nupkg-${{ matrix.platform }}
+          path: LibGit2Sharp.NativeBinaries.UiPath.0.0.0-ci${{ github.run_number }}.nupkg
+          if-no-files-found: error
