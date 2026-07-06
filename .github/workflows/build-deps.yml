@@ -48,8 +48,10 @@ jobs:
           - platform: linux-arm64
             os: ubuntu-24.04-arm
             triplet: arm64-linux-dynamic
+          # Cross-compiled on Apple Silicon (see deps/triplets/x64-osx.cmake): macos-13 Intel
+          # runners are scarce/slow and being retired.
           - platform: osx-x64
-            os: macos-13
+            os: macos-14
             triplet: x64-osx
           - platform: osx-arm64
             os: macos-14
