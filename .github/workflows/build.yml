@@ -53,8 +53,14 @@ jobs:
       - name: Build libgit2 and pack NuGet
         shell: pwsh
         run: |
+          # build.libgit2.ps1 is written for the default 'Continue' preference (its critical steps
+          # use Run-Command -Fatal, which Throws and still fails the job); GitHub's pwsh shell forces
+          # 'Stop', which would abort on the script's best-effort cleanup Remove-Item calls.
+          $ErrorActionPreference = 'Continue'
           ./build.libgit2.ps1 -vs '${{ matrix.vs }}'
+          if ($LASTEXITCODE) { throw "build.libgit2.ps1 failed ($LASTEXITCODE)" }
           ./buildpackage.ps1 -version '0.0.0-ci${{ github.run_number }}'
+          if ($LASTEXITCODE) { throw "buildpackage.ps1 failed ($LASTEXITCODE)" }
 
       - name: Upload NuGet package
         uses: actions/upload-artifact@v4
