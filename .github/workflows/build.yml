@@ -12,6 +12,7 @@ on:
     paths:
       - libgit2
       - build.libgit2.ps1
+      - build.libgit2.sh
       - buildpackage.ps1
       - fetch.deps.ps1
       - deps.lock.json
@@ -29,13 +30,23 @@ jobs:
         include:
           # Windows legs. Pin windows-2022 so the "Visual Studio 17 2022" cmake generator matches the
           # runner's VS (windows-latest has moved past VS 2022); the arm64 leg builds natively on the
-          # windows-11-arm runner. posix legs (linux/osx) are added here later.
+          # windows-11-arm runner.
           - platform: win-x64
             os: windows-2022
             vs: "17 2022"
           - platform: win-arm64
             os: windows-11-arm
             vs: "17 2022"
+          # posix legs: build.libgit2.sh links the static deps into a single liblibgit2.{so,dylib}.
+          # osx-x64 cross-compiles on Apple Silicon (Intel runners are retired); arm64 legs are native.
+          - platform: linux-x64
+            os: ubuntu-latest
+          - platform: linux-arm64
+            os: ubuntu-24.04-arm
+          - platform: osx-x64
+            os: macos-14
+          - platform: osx-arm64
+            os: macos-14
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
@@ -55,7 +66,8 @@ jobs:
           git config --global url."git@github.com:UiPath/libgit2.git".insteadOf "https://github.com/UiPath/libgit2.git"
           git submodule update --init libgit2
 
-      - name: Build libgit2 and pack NuGet
+      - name: Build libgit2 and pack NuGet (Windows)
+        if: runner.os == 'Windows'
         shell: pwsh
         run: |
           # build.libgit2.ps1 is written for the default 'Continue' preference (its critical steps
@@ -67,9 +79,27 @@ jobs:
           ./buildpackage.ps1 -version '0.0.0-ci${{ github.run_number }}'
           if ($LASTEXITCODE) { throw "buildpackage.ps1 failed ($LASTEXITCODE)" }
 
-      - name: Upload NuGet package
+      - name: Build libgit2 (posix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          chmod +x ./build.libgit2.sh
+          ./build.libgit2.sh '${{ matrix.platform }}'
+
+      - name: Upload NuGet package (Windows)
+        if: runner.os == 'Windows'
         uses: actions/upload-artifact@v4
         with:
           name: nupkg-${{ matrix.platform }}
           path: LibGit2Sharp.NativeBinaries.UiPath.0.0.0-ci${{ github.run_number }}.nupkg
+          if-no-files-found: error
+
+      # posix legs don't pack yet (nuget.exe is Windows-only); they upload the native lib so a
+      # follow-up job can assemble one multi-RID NuGet. The unified pack is the next increment.
+      - name: Upload native lib (posix)
+        if: runner.os != 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-${{ matrix.platform }}
+          path: nuget.package/runtimes/${{ matrix.platform }}/native/*
           if-no-files-found: error
