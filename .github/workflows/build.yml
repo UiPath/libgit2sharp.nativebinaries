@@ -27,11 +27,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # win-x64 first; other platforms are added here later.
-          # Pin windows-2022 so the "Visual Studio 17 2022" cmake generator matches the runner's VS
-          # (windows-latest has moved past VS 2022).
+          # Windows legs. Pin windows-2022 so the "Visual Studio 17 2022" cmake generator matches the
+          # runner's VS (windows-latest has moved past VS 2022); the arm64 leg builds natively on the
+          # windows-11-arm runner. posix legs (linux/osx) are added here later.
           - platform: win-x64
             os: windows-2022
+            vs: "17 2022"
+          - platform: win-arm64
+            os: windows-11-arm
             vs: "17 2022"
     runs-on: ${{ matrix.os }}
     steps:
@@ -59,7 +62,7 @@ jobs:
           # use Run-Command -Fatal, which Throws and still fails the job); GitHub's pwsh shell forces
           # 'Stop', which would abort on the script's best-effort cleanup Remove-Item calls.
           $ErrorActionPreference = 'Continue'
-          ./build.libgit2.ps1 -vs '${{ matrix.vs }}'
+          ./build.libgit2.ps1 -vs '${{ matrix.vs }}' -Platform '${{ matrix.platform }}'
           if ($LASTEXITCODE) { throw "build.libgit2.ps1 failed ($LASTEXITCODE)" }
           ./buildpackage.ps1 -version '0.0.0-ci${{ github.run_number }}'
           if ($LASTEXITCODE) { throw "buildpackage.ps1 failed ($LASTEXITCODE)" }

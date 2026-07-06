@@ -12,6 +12,7 @@
 Param(
     [string]$vs = '16 2019',
     [string]$libgit2Name = '',
+    [string]$Platform = 'win-x64',
     [switch]$test,
     [switch]$debug
 )
@@ -20,12 +21,17 @@ Set-StrictMode -Version Latest
 
 $projectDirectory = Split-Path $MyInvocation.MyCommand.Path
 $libgit2Directory = Join-Path $projectDirectory "libgit2"
-$x86Directory = Join-Path $projectDirectory "nuget.package\runtimes\win-x86\native"
-$x64Directory = Join-Path $projectDirectory "nuget.package\runtimes\win-x64\native"
+
+# $Platform is a RID (win-x64 / win-arm64); derive the cmake target arch and packaging locations.
+$arch = ($Platform -split '-')[-1]                                  # x64 | arm64
+$cmakeArch = if ($arch -eq 'arm64') { 'ARM64' } else { 'x64' }     # cmake -A value
+# OpenSSL's runtime DLL carries an arch suffix: libcrypto-3-x64.dll / libcrypto-3-arm64.dll.
+$opensslDllSuffix = "-$arch"
+$nativeDirectory = Join-Path $projectDirectory "nuget.package\runtimes\$Platform\native"
 $hashFile = Join-Path $projectDirectory "nuget.package\libgit2\libgit2_hash.txt"
 # Prebuilt OpenSSL + libssh2, fetched & SHA256-verified by fetch.deps.ps1 (we no longer build them here).
 # Use forward slashes: these paths are passed to cmake, which treats backslashes as escape sequences.
-$depsDirectory = (Join-Path $projectDirectory "deps\win-x64").Replace('\', '/')
+$depsDirectory = (Join-Path $projectDirectory "deps\$Platform").Replace('\', '/')
 
 if (![string]::IsNullOrEmpty($libgit2Name)) {
     $binaryFilename = $libgit2Name
@@ -132,12 +138,8 @@ function Build-LibGit($generator, $platform, $nugetDir, $useSchannel, $useSshExe
     Run-Command -Quiet { & mkdir -fo $nugetDir }
     Run-Command -Quiet -Fatal { & copy -fo * $nugetDir -Exclude *.lib }
 	
-	$opensslPlatformPostfix = ""
-	if ($platform -eq "x64") {
-		$opensslPlatformPostfix = "-x64"
-	}
 	Copy-Item "$depsBinDir/libssh2.dll" -Destination $nugetDir -Force
-	Copy-Item "$depsBinDir/libcrypto-3$opensslPlatformPostfix.dll" -Destination $nugetDir -Force
+	Copy-Item "$depsBinDir/libcrypto-3$opensslDllSuffix.dll" -Destination $nugetDir -Force
 }
 
 function Assert-Consistent-Naming($expected, $path) {
@@ -155,12 +157,12 @@ try {
     $ctest = Join-Path (Split-Path -Parent $cmake) "ctest.exe"
 
     # Fetch & hash-verify prebuilt OpenSSL + libssh2 (replaces compiling them from the submodules here).
-    & (Join-Path $projectDirectory "fetch.deps.ps1") -Platform "win-x64"
+    & (Join-Path $projectDirectory "fetch.deps.ps1") -Platform $Platform
 
-	Build-LibGit "Visual Studio $vs" "x64" $x64Directory $false $false
-	Build-LibGit "Visual Studio $vs" "x64" $x64Directory $true $false
-	Build-LibGit "Visual Studio $vs" "x64" $x64Directory $false $true
-	Build-LibGit "Visual Studio $vs" "x64" $x64Directory $true $true
+	Build-LibGit "Visual Studio $vs" $cmakeArch $nativeDirectory $false $false
+	Build-LibGit "Visual Studio $vs" $cmakeArch $nativeDirectory $true $false
+	Build-LibGit "Visual Studio $vs" $cmakeArch $nativeDirectory $false $true
+	Build-LibGit "Visual Studio $vs" $cmakeArch $nativeDirectory $true $true
 
     Write-Output "Done!"
 }
