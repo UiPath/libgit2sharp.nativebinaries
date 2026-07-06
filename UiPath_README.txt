@@ -1,12 +1,11 @@
 Building the UiPath LibGit2Sharp native binaries
 ================================================
 
-The native dependencies (OpenSSL + libssh2) are NO LONGER built here. Each is compiled
-independently by its own GitHub Actions workflow (`build-openssl.yml` / `build-libssh2.yml`, via
-vcpkg from the `openssl` / `libssh2` submodules), published as a SHA256-verified per-component
-archive on a GitHub Release, and fetched by `fetch.deps.ps1` during the libgit2 build. This removes
-the old Perl / NASM / nmake / OpenSSL build toolchain from this build and is what lets us target
-additional platforms. They are split so a frequent OpenSSL bump never rebuilds libssh2.
+The native dependencies (OpenSSL + libssh2) are NO LONGER built here. They are compiled once by
+the `build-deps` GitHub Actions workflow (via vcpkg, from the `openssl` and `libssh2` submodules),
+published as a SHA256-verified archive on a GitHub Release, and fetched by `fetch.deps.ps1` during
+the libgit2 build. This removes the old Perl / NASM / nmake / OpenSSL build toolchain from this
+build and is what lets us target additional platforms.
 
 Prerequisites for building libgit2 (this repo):
 - Build Tools for Visual Studio 2019, "Desktop development with C++" workload
@@ -20,24 +19,21 @@ Building:
 
 The prebuilt native dependencies
 --------------------------------
-- `deps/openssl/vcpkg.json`, `deps/libssh2/vcpkg.json`
-                      - per-component vcpkg manifests pinning each version (kept in lock-step with
-                        the submodule tags; libssh2 uses the OpenSSL backend, zlib disabled).
-- `build.deps.ps1`    - run by the build workflows on a GitHub runner: `-Component openssl|libssh2`
-                        builds that dep with vcpkg, asserts submodule == manifest override == built
-                        version, stages a per-platform archive (include/ lib/ bin/, no .pdb) and
-                        prints its SHA256 + release tag.
-- `deps.lock.json`    - per-component, per-platform archive URL + REQUIRED SHA256. `fetch.deps.ps1`
-                        fails hard if a SHA256 is empty or does not match the download.
-- `fetch.deps.ps1`    - downloads + verifies + extracts both components (merged) to `deps/<platform>/`.
+- `deps/vcpkg.json`   - vcpkg manifest pinning the OpenSSL + libssh2 versions (kept in lock-step
+                        with the submodule tags; libssh2 uses the OpenSSL backend, zlib disabled).
+- `build.deps.ps1`    - run by `build-deps.yml` on a GitHub runner: builds the deps with vcpkg,
+                        asserts the built versions match the submodule tags, stages a per-platform
+                        archive (include/ lib/ bin/) and prints its SHA256 + release tag.
+- `deps.lock.json`    - per-platform archive URL + REQUIRED SHA256. `fetch.deps.ps1` fails hard if
+                        the SHA256 is empty or does not match the download.
+- `fetch.deps.ps1`    - downloads + verifies + extracts the archive to `deps/<platform>/`.
 
-To change the OpenSSL or libssh2 version:
+To change the OpenSSL / libssh2 version:
 1. Move the submodule to the desired release tag (e.g. `git -C openssl checkout openssl-3.6.3`).
-2. Update the `overrides` in `deps/<component>/vcpkg.json` to a version that exists in vcpkg's
+2. Update the matching `overrides` entry in `deps/vcpkg.json` to a version that exists in vcpkg's
    registry (see https://github.com/microsoft/vcpkg/tree/master/versions).
-3. Run the matching workflow (`build-openssl` / `build-libssh2`). Copy the SHA256 and release tag
-   it prints into `deps.lock.json`. An OpenSSL major bump (e.g. 3.x -> 4.x) also requires re-running
-   `build-libssh2` (libssh2's linked crypto DLL name changes).
+3. Run the `build-deps` workflow (workflow_dispatch). Copy the SHA256 and release tag it prints
+   into `deps.lock.json`.
 
 Versioning:
 The version of the package is determined by the `libgit2` version. For example, when using
