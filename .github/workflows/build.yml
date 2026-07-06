@@ -66,7 +66,7 @@ jobs:
           git config --global url."git@github.com:UiPath/libgit2.git".insteadOf "https://github.com/UiPath/libgit2.git"
           git submodule update --init libgit2
 
-      - name: Build libgit2 and pack NuGet (Windows)
+      - name: Build libgit2 (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
@@ -76,8 +76,6 @@ jobs:
           $ErrorActionPreference = 'Continue'
           ./build.libgit2.ps1 -vs '${{ matrix.vs }}' -Platform '${{ matrix.platform }}'
           if ($LASTEXITCODE) { throw "build.libgit2.ps1 failed ($LASTEXITCODE)" }
-          ./buildpackage.ps1 -version '0.0.0-ci${{ github.run_number }}'
-          if ($LASTEXITCODE) { throw "buildpackage.ps1 failed ($LASTEXITCODE)" }
 
       - name: Build libgit2 (posix)
         if: runner.os != 'Windows'
@@ -86,20 +84,53 @@ jobs:
           chmod +x ./build.libgit2.sh
           ./build.libgit2.sh '${{ matrix.platform }}'
 
-      - name: Upload NuGet package (Windows)
-        if: runner.os == 'Windows'
-        uses: actions/upload-artifact@v4
-        with:
-          name: nupkg-${{ matrix.platform }}
-          path: LibGit2Sharp.NativeBinaries.UiPath.0.0.0-ci${{ github.run_number }}.nupkg
-          if-no-files-found: error
-
-      # posix legs don't pack yet (nuget.exe is Windows-only); they upload the native lib so a
-      # follow-up job can assemble one multi-RID NuGet. The unified pack is the next increment.
-      - name: Upload native lib (posix)
-        if: runner.os != 'Windows'
+      # Each leg uploads only its own RID's native binaries; the pack job assembles them into one
+      # multi-RID NuGet.
+      - name: Upload native binaries
         uses: actions/upload-artifact@v4
         with:
           name: native-${{ matrix.platform }}
           path: nuget.package/runtimes/${{ matrix.platform }}/native/*
+          if-no-files-found: error
+
+  pack:
+    needs: build
+    runs-on: windows-2022   # nuget.exe Pack (buildpackage.ps1) is Windows-only
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download all native binaries
+        uses: actions/download-artifact@v4
+        with:
+          pattern: native-*
+          path: _natives
+
+      - name: Assemble runtimes tree
+        shell: bash
+        # download-artifact drops each artifact under _natives/native-<rid>/; place each RID's files
+        # back at nuget.package/runtimes/<rid>/native/ so nuget pack picks them all up.
+        run: |
+          for d in _natives/native-*; do
+            rid="${d#_natives/native-}"
+            mkdir -p "nuget.package/runtimes/$rid/native"
+            cp -rv "$d"/* "nuget.package/runtimes/$rid/native/"
+          done
+          echo "=== assembled runtimes tree ==="
+          find nuget.package/runtimes -type f | sort
+
+      - name: Pack multi-RID NuGet
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          # TODO: replace the placeholder version with minver-cli (git-tag driven, matching the
+          # managed LibGit2Sharp repo's MinVer scheme).
+          ./buildpackage.ps1 -version '0.0.0-ci${{ github.run_number }}'
+          if ($LASTEXITCODE) { throw "buildpackage.ps1 failed ($LASTEXITCODE)" }
+
+      - name: Upload NuGet package
+        uses: actions/upload-artifact@v4
+        with:
+          name: nupkg
+          path: LibGit2Sharp.NativeBinaries.UiPath.0.0.0-ci${{ github.run_number }}.nupkg
           if-no-files-found: error
