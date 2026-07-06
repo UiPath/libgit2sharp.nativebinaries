@@ -33,9 +33,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Windows/macOS stock triplets are dynamic; Linux uses our overlay dynamic triplets
-          # (deps/triplets) because the stock x64-linux/arm64-linux triplets are static.
-          # arm64 legs build natively on GitHub's arm runners.
+          # Windows ships separate dynamic DLLs (loader finds co-located deps). Linux/macOS link the
+          # deps statically into a single libgit2 shared lib, so those triplets are static+PIC via
+          # our overlays in deps/triplets (which shadow the stock triplet names). arm64 legs build
+          # natively on GitHub's arm runners.
           - platform: win-x64
             os: windows-latest
             triplet: x64-windows
@@ -44,10 +45,10 @@ jobs:
             triplet: arm64-windows
           - platform: linux-x64
             os: ubuntu-latest
-            triplet: x64-linux-dynamic
+            triplet: x64-linux
           - platform: linux-arm64
             os: ubuntu-24.04-arm
-            triplet: arm64-linux-dynamic
+            triplet: arm64-linux
           # Cross-compiled on Apple Silicon (see deps/triplets/x64-osx.cmake): macos-13 Intel
           # runners are scarce/slow and being retired.
           - platform: osx-x64
