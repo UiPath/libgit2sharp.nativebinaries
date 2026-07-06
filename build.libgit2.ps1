@@ -24,7 +24,8 @@ $x86Directory = Join-Path $projectDirectory "nuget.package\runtimes\win-x86\nati
 $x64Directory = Join-Path $projectDirectory "nuget.package\runtimes\win-x64\native"
 $hashFile = Join-Path $projectDirectory "nuget.package\libgit2\libgit2_hash.txt"
 # Prebuilt OpenSSL + libssh2, fetched & SHA256-verified by fetch.deps.ps1 (we no longer build them here).
-$depsDirectory = Join-Path $projectDirectory "deps\win-x64"
+# Use forward slashes: these paths are passed to cmake, which treats backslashes as escape sequences.
+$depsDirectory = (Join-Path $projectDirectory "deps\win-x64").Replace('\', '/')
 
 if (![string]::IsNullOrEmpty($libgit2Name)) {
     $binaryFilename = $libgit2Name
