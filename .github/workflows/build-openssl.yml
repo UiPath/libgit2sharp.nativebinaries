@@ -1,0 +1,67 @@
+name: build-openssl
+
+# Builds the OpenSSL native dependency with vcpkg and publishes a per-platform archive (+ SHA256)
+# as a GitHub Release. Runs only when the openssl submodule / its manifest changes, so libssh2 is
+# never rebuilt or re-published on an OpenSSL bump. The main libgit2 build fetches + verifies these
+# via deps.lock.json.
+on:
+  workflow_dispatch:
+  # Temporary push trigger while this workflow lives only on a feature branch (workflow_dispatch
+  # requires the file on the default branch). Remove once merged to the default branch.
+  push:
+    branches:
+      - feature/ab/pipeline_iter_1
+    paths:
+      - openssl
+      - deps/openssl/**
+      - build.deps.ps1
+      - .github/workflows/build-openssl.yml
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # win-x64 first; other platforms are added here later.
+          - platform: win-x64
+            os: windows-latest
+            triplet: x64-windows
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Init openssl submodule
+        shell: bash
+        run: git submodule update --init --depth 1 openssl
+
+      - name: Build OpenSSL with vcpkg
+        id: build
+        shell: pwsh
+        run: ./build.deps.ps1 -Component openssl -Triplet '${{ matrix.triplet }}' -Platform '${{ matrix.platform }}'
+
+      - name: Upload archive as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: openssl-${{ matrix.platform }}
+          path: |
+            ${{ steps.build.outputs.archive }}
+            ${{ steps.build.outputs.archive }}.sha256
+
+      - name: Publish to GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = '${{ steps.build.outputs.tag }}'
+          $archive = '${{ steps.build.outputs.archive }}'
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag --title $tag --notes "Prebuilt OpenSSL native dependency (per-platform archives + SHA256 sidecars)."
+          }
+          gh release upload $tag $archive "$archive.sha256" --clobber
+          Write-Host "Published $archive to release $tag with SHA256 ${{ steps.build.outputs.sha256 }}"

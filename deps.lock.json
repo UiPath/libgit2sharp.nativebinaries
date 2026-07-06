@@ -1,12 +1,26 @@
 {
-  "$comment": "Maps each platform to its prebuilt native-deps archive (OpenSSL + libssh2) produced by the build-deps GitHub workflow. 'sha256' is REQUIRED: fetch.deps.ps1 fails hard if it is empty or does not match the downloaded archive. After running build-deps.yml, copy the SHA256 it prints (and the release tag) here.",
+  "$comment": "Per-component prebuilt native-deps archives (built by build-openssl.yml / build-libssh2.yml). Each component is versioned independently. 'sha256' is REQUIRED: fetch.deps.ps1 fails hard if it is empty or does not match the download. After a build-* workflow run, copy the SHA256 it prints (and the tag) into the matching component/platform entry.",
   "repo": "UiPath/libgit2sharp.nativebinaries",
-  "tag": "deps-openssl-3.6.3_libssh2-1.11.1",
-  "platforms": {
-    "win-x64": {
-      "filename": "deps-win-x64.zip",
-      "url": "https://github.com/UiPath/libgit2sharp.nativebinaries/releases/download/deps-openssl-3.6.3_libssh2-1.11.1/deps-win-x64.zip",
-      "sha256": ""
+  "components": {
+    "openssl": {
+      "tag": "deps-openssl-3.6.3",
+      "platforms": {
+        "win-x64": {
+          "filename": "openssl-win-x64.zip",
+          "url": "https://github.com/UiPath/libgit2sharp.nativebinaries/releases/download/deps-openssl-3.6.3/openssl-win-x64.zip",
+          "sha256": ""
+        }
+      }
+    },
+    "libssh2": {
+      "tag": "deps-libssh2-1.11.1",
+      "platforms": {
+        "win-x64": {
+          "filename": "libssh2-win-x64.zip",
+          "url": "https://github.com/UiPath/libgit2sharp.nativebinaries/releases/download/deps-libssh2-1.11.1/libssh2-win-x64.zip",
+          "sha256": ""
+        }
+      }
     }
   }
 }

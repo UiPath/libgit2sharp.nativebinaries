@@ -6,6 +6,11 @@
 *.zip
 
 # deps working dirs (vcpkg build output + fetched prebuilt archives).
-# Only the manifest is tracked; everything else under deps/ is generated.
+# Only the per-component vcpkg manifests are tracked; everything else under deps/ is generated.
 /deps/*
-!/deps/vcpkg.json
+!/deps/openssl
+!/deps/libssh2
+/deps/openssl/*
+/deps/libssh2/*
+!/deps/openssl/vcpkg.json
+!/deps/libssh2/vcpkg.json

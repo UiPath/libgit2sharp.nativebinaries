@@ -1,0 +1,8 @@
+{
+  "$comment": "vcpkg manifest for the OpenSSL native dependency. Built and published independently of libssh2 (OpenSSL patches roll far more often). Kept in lock-step with the openssl git submodule tag; build.deps.ps1 asserts submodule == this override == the version vcpkg built.",
+  "name": "libgit2-native-deps-openssl",
+  "version-string": "0.0.0",
+  "builtin-baseline": "fab1c6dc7a944372a90a1e19ab5e8e32cd658fc2",
+  "dependencies": [ "openssl" ],
+  "overrides": [ { "name": "openssl", "version": "3.6.3" } ]
+}

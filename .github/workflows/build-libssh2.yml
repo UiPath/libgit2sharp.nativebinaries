@@ -1,0 +1,69 @@
+name: build-libssh2
+
+# Builds the libssh2 native dependency with vcpkg (OpenSSL crypto backend, pulled as a vcpkg build
+# dependency) and publishes a per-platform archive (+ SHA256) as a GitHub Release. Runs only when
+# the libssh2 submodule / its manifest changes. libssh2 links libcrypto-3-x64.dll by name and stays
+# ABI-compatible across the OpenSSL 3.x series, so an OpenSSL patch bump does NOT require re-running
+# this workflow (only an OpenSSL MAJOR bump does). The main libgit2 build fetches + verifies these
+# via deps.lock.json.
+on:
+  workflow_dispatch:
+  # Temporary push trigger while this workflow lives only on a feature branch (workflow_dispatch
+  # requires the file on the default branch). Remove once merged to the default branch.
+  push:
+    branches:
+      - feature/ab/pipeline_iter_1
+    paths:
+      - libssh2
+      - deps/libssh2/**
+      - build.deps.ps1
+      - .github/workflows/build-libssh2.yml
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # win-x64 first; other platforms are added here later.
+          - platform: win-x64
+            os: windows-latest
+            triplet: x64-windows
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Init libssh2 submodule
+        shell: bash
+        run: git submodule update --init --depth 1 libssh2
+
+      - name: Build libssh2 with vcpkg
+        id: build
+        shell: pwsh
+        run: ./build.deps.ps1 -Component libssh2 -Triplet '${{ matrix.triplet }}' -Platform '${{ matrix.platform }}'
+
+      - name: Upload archive as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: libssh2-${{ matrix.platform }}
+          path: |
+            ${{ steps.build.outputs.archive }}
+            ${{ steps.build.outputs.archive }}.sha256
+
+      - name: Publish to GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = '${{ steps.build.outputs.tag }}'
+          $archive = '${{ steps.build.outputs.archive }}'
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag --title $tag --notes "Prebuilt libssh2 native dependency (per-platform archives + SHA256 sidecars)."
+          }
+          gh release upload $tag $archive "$archive.sha256" --clobber
+          Write-Host "Published $archive to release $tag with SHA256 ${{ steps.build.outputs.sha256 }}"
