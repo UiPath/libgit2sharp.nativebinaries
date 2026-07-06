@@ -1,0 +1,59 @@
+name: build-deps
+
+# Builds the prebuilt native dependencies (OpenSSL + libssh2) with vcpkg and publishes a
+# per-platform archive (+ SHA256) as a GitHub Release asset. The main libgit2 build fetches and
+# verifies these against deps.lock.json, so it never has to compile OpenSSL/libssh2 itself.
+#
+# Run manually after bumping the openssl/libssh2 submodules (and deps/vcpkg.json to match).
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # win-x64 first; other platforms (arm64-windows, {x64,arm64}-{linux,osx}) are added here later.
+          - platform: win-x64
+            os: windows-latest
+            triplet: x64-windows
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout (with submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Build dependencies with vcpkg
+        id: build
+        shell: pwsh
+        run: ./build.deps.ps1 -Triplet '${{ matrix.triplet }}' -Platform '${{ matrix.platform }}'
+
+      - name: Upload archive as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: deps-${{ matrix.platform }}
+          path: |
+            ${{ steps.build.outputs.archive }}
+            ${{ steps.build.outputs.archive }}.sha256
+
+      - name: Publish to GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = '${{ steps.build.outputs.tag }}'
+          $archive = '${{ steps.build.outputs.archive }}'
+          # Create the release once; ignore failure if a previous matrix leg already created it.
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag --title $tag --notes "Prebuilt OpenSSL + libssh2 native dependencies. SHA256 sidecar files accompany each archive."
+          }
+          gh release upload $tag $archive "$archive.sha256" --clobber
+          Write-Host "Published $archive to release $tag with SHA256 ${{ steps.build.outputs.sha256 }}"
