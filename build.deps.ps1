@@ -24,13 +24,24 @@ Param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+# Native commands (git/vcpkg/tar) drive control flow via explicit $LASTEXITCODE checks below; do NOT
+# let a non-zero exit auto-throw before we can react to it (PowerShell 7.4+ defaults this to $true,
+# which would break e.g. the "fetch the vcpkg baseline if it's missing" branch). Assigning this on
+# Windows PowerShell 5.1 just creates a harmless unused variable.
+$PSNativeCommandUseErrorActionPreference = $false
 
 $projectDirectory = Split-Path $MyInvocation.MyCommand.Path
 $depsDirectory = Join-Path $projectDirectory 'deps'
 $manifestPath = Join-Path $depsDirectory 'vcpkg.json'
+$tripletsDir = Join-Path $depsDirectory 'triplets'
 $installRoot = Join-Path $depsDirectory 'vcpkg_installed'
 $stagingRoot = Join-Path $depsDirectory ('_staging/' + $Platform)
-$archivePath = Join-Path $depsDirectory ('_staging/deps-' + $Platform + '.zip')
+
+# $IsWindows is $null on Windows PowerShell 5.1 (treated as Windows); on the runners this is pwsh 7.
+$isWindowsHost = $IsWindows -or ($null -eq $IsWindows)
+# Windows keeps zip (Expand-Archive); posix uses tar.gz so shared-lib symlinks + exec perms survive.
+$archiveExt = if ($isWindowsHost) { 'zip' } else { 'tar.gz' }
+$archivePath = Join-Path $depsDirectory ('_staging/deps-' + $Platform + '.' + $archiveExt)
 
 function Get-OpensslSubmoduleVersion {
     # OpenSSL's exact version lives in VERSION.dat (no git tags needed).
@@ -92,6 +103,7 @@ if ($LASTEXITCODE -ne 0) {
 Write-Host "==> vcpkg install (triplet=$Triplet) from $manifestPath"
 & $vcpkg install `
     --triplet $Triplet `
+    --overlay-triplets=$tripletsDir `
     --x-manifest-root=$depsDirectory `
     --x-install-root=$installRoot `
     --clean-after-build
@@ -148,9 +160,16 @@ $manifestTxt = Join-Path $stagingRoot 'manifest.txt'
     "vcpkg-baseline= $baseline"
 ) | Set-Content -Path $manifestTxt -Encoding utf8
 
-# --- Zip + hash ---------------------------------------------------------------
+# --- Archive + hash -----------------------------------------------------------
 if (Test-Path $archivePath) { Remove-Item $archivePath -Force }
-Compress-Archive -Path (Join-Path $stagingRoot '*') -DestinationPath $archivePath -CompressionLevel Optimal
+if ($isWindowsHost) {
+    Compress-Archive -Path (Join-Path $stagingRoot '*') -DestinationPath $archivePath -CompressionLevel Optimal
+} else {
+    # tar preserves the .so/.dylib symlinks and executable bits that zip would flatten; bsdtar/gnu
+    # tar is present on all posix runners. -C staging '.' keeps paths relative to the archive root.
+    & tar -czf $archivePath -C $stagingRoot .
+    if ($LASTEXITCODE -ne 0) { throw "tar failed with exit code $LASTEXITCODE." }
+}
 $sha256 = (Get-FileHash -Algorithm SHA256 -Path $archivePath).Hash.ToLower()
 Set-Content -Path "$archivePath.sha256" -Value $sha256 -Encoding ascii -NoNewline
 

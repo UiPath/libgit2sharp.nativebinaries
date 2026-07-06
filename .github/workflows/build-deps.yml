@@ -10,6 +10,19 @@ on:
   # dispatchable from the Actions UI. Run after bumping the openssl/libssh2 submodules and
   # deps/vcpkg.json, then copy the printed SHA256 into deps.lock.json.
   workflow_dispatch:
+  # TEMPORARY push trigger while iterating on the feature branch (workflow_dispatch isn't reachable
+  # until this file is on the default branch). REMOVE before merging to develop: on develop this
+  # workflow must stay manual so it doesn't republish the pinned deps release on every push.
+  push:
+    branches:
+      - feature/ab/pipeline_iter_1
+    paths:
+      - deps/**
+      - build.deps.ps1
+      - .github/workflows/build-deps.yml
+      - openssl
+      - libssh2
+      - .gitmodules
 
 permissions:
   contents: write
@@ -20,10 +33,27 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # win-x64 first; other platforms (arm64-windows, {x64,arm64}-{linux,osx}) are added here later.
+          # Windows/macOS stock triplets are dynamic; Linux uses our overlay dynamic triplets
+          # (deps/triplets) because the stock x64-linux/arm64-linux triplets are static.
+          # arm64 legs build natively on GitHub's arm runners.
           - platform: win-x64
             os: windows-latest
             triplet: x64-windows
+          - platform: win-arm64
+            os: windows-11-arm
+            triplet: arm64-windows
+          - platform: linux-x64
+            os: ubuntu-latest
+            triplet: x64-linux-dynamic
+          - platform: linux-arm64
+            os: ubuntu-24.04-arm
+            triplet: arm64-linux-dynamic
+          - platform: osx-x64
+            os: macos-13
+            triplet: x64-osx
+          - platform: osx-arm64
+            os: macos-14
+            triplet: arm64-osx
 
     runs-on: ${{ matrix.os }}
 
@@ -55,12 +85,17 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # Drive on $LASTEXITCODE, not auto-throw: 6 matrix legs publish concurrently, so `view`
+          # 404s and the losing `create` race are expected and must not fail the job.
+          $ErrorActionPreference = 'Continue'
+          $PSNativeCommandUseErrorActionPreference = $false
           $tag = '${{ steps.build.outputs.tag }}'
           $archive = '${{ steps.build.outputs.archive }}'
-          # Create the release once; ignore failure if a previous matrix leg already created it.
+          # Create the release once; ignore failure if a concurrent matrix leg already created it.
           gh release view $tag *> $null
           if ($LASTEXITCODE -ne 0) {
             gh release create $tag --title $tag --notes "Prebuilt OpenSSL + libssh2 native dependencies. SHA256 sidecar files accompany each archive."
           }
           gh release upload $tag $archive "$archive.sha256" --clobber
+          if ($LASTEXITCODE -ne 0) { throw "gh release upload failed ($LASTEXITCODE)" }
           Write-Host "Published $archive to release $tag with SHA256 ${{ steps.build.outputs.sha256 }}"
