@@ -12,8 +12,22 @@ on:
         description: 'Publish the native archive as a GitHub Release (PR builds produce an artifact only)'
         type: boolean
         default: false
-  # Validate on PRs that touch the native build; never on a bare push. Publishing a durable release
-  # is a deliberate act (workflow_dispatch with publish=true), so PR runs upload the artifact only.
+  # Auto-publish a fresh natives Release when native-affecting changes land on develop (the release
+  # gate below opens on refs/heads/develop). Only develop — feature-branch pushes never trigger.
+  push:
+    branches:
+      - develop
+    paths:
+      - libgit2
+      - build.libgit2.ps1
+      - build.libgit2.sh
+      - buildpackage.ps1
+      - fetch.deps.ps1
+      - deps.lock.json
+      - nuget.package/**
+      - .github/workflows/build.yml
+  # Validate on PRs that touch the native build (artifact only; publishing stays gated on develop /
+  # workflow_dispatch publish=true).
   pull_request:
     paths:
       - libgit2
