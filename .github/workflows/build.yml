@@ -138,12 +138,21 @@ jobs:
           dotnet tool install --global minver-cli --version 4.3.0 *> $null
           $env:PATH += ";$env:USERPROFILE\.dotnet\tools"
           # Empty tag prefix + preview.0 identifiers: same MinVer scheme as the managed LibGit2Sharp
-          # repo, so both are driven by the same X.Y.Z-vN tags (e.g. a "1.9.1-v5" tag -> 1.9.1-v5).
-          $version = (minver --default-pre-release-identifiers preview.0).Trim()
+          # repo, so both are driven by the same X.Y.Z-vN base tags (e.g. a "1.9.1-v5" tag).
+          $raw = (minver --default-pre-release-identifiers preview.0).Trim()
           if ($LASTEXITCODE) { throw "minver failed ($LASTEXITCODE)" }
           # Version strings carry no build metadata in the archive/tag name; drop anything after '+'.
-          $version = $version.Split('+')[0]
-          Write-Host "Resolved version: $version"
+          $raw = $raw.Split('+')[0]
+          # Collapse MinVer's "<base>-<epoch>.<height>" (e.g. 1.9.1-v5.21) into a single
+          # auto-incrementing "<base>-v<height>" (e.g. 1.9.1-v21), matching the managed repo's
+          # AdjustVersions target. The epoch tag is only a permanent counting anchor: v<height> rises
+          # monotonically per commit, so no manual version tagging is needed. NEVER cut another -vN tag
+          # on the line, or the height (hence v<N>) resets and the version would regress.
+          $parts = $raw -split '-', 2
+          $base = $parts[0]
+          $height = if (($parts.Count -gt 1) -and ($parts[1] -match '\.(\d+)$')) { $Matches[1] } else { '0' }
+          $version = "$base-v$height"
+          Write-Host "Resolved version: $version (from MinVer '$raw')"
           "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
       - name: Assemble native archive
