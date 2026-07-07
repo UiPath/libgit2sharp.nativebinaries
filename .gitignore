@@ -4,3 +4,10 @@
 *.dylib
 *.so
 *.zip
+
+# deps working dirs (vcpkg build output + fetched prebuilt archives).
+# Only the manifest and the overlay triplets are tracked; everything else under deps/ is generated.
+/deps/*
+!/deps/vcpkg.json
+!/deps/triplets/
+!/deps/triplets/**

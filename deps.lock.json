@@ -1,0 +1,37 @@
+{
+  "$comment": "Maps each platform to its prebuilt native-deps archive (OpenSSL + libssh2) produced by the build-deps GitHub workflow. 'sha256' is REQUIRED: fetch.deps.ps1 fails hard if it is empty or does not match the downloaded archive. Windows archives are dynamic DLLs (.zip); posix archives are static .a libraries (.tar.gz) linked into libgit2. After re-running build-deps.yml, copy the SHA256 sidecars it publishes here.",
+  "repo": "UiPath/libgit2sharp.nativebinaries",
+  "tag": "deps-openssl-3.6.3_libssh2-1.11.1",
+  "platforms": {
+    "win-x64": {
+      "filename": "deps-win-x64.zip",
+      "url": "https://github.com/UiPath/libgit2sharp.nativebinaries/releases/download/deps-openssl-3.6.3_libssh2-1.11.1/deps-win-x64.zip",
+      "sha256": "be4614ba7f50b016548545511d7a4ac7264b604bf737e67aa7639906f5d2140d"
+    },
+    "win-arm64": {
+      "filename": "deps-win-arm64.zip",
+      "url": "https://github.com/UiPath/libgit2sharp.nativebinaries/releases/download/deps-openssl-3.6.3_libssh2-1.11.1/deps-win-arm64.zip",
+      "sha256": "951deb2ce427709a2ff0929c86ad0cef906c6bacd63c87474c40a715319da6fa"
+    },
+    "linux-x64": {
+      "filename": "deps-linux-x64.tar.gz",
+      "url": "https://github.com/UiPath/libgit2sharp.nativebinaries/releases/download/deps-openssl-3.6.3_libssh2-1.11.1/deps-linux-x64.tar.gz",
+      "sha256": "570c3d279b801d637c4f653fcb9365fa91ee366152f1fbe9c8fc303f38951d90"
+    },
+    "linux-arm64": {
+      "filename": "deps-linux-arm64.tar.gz",
+      "url": "https://github.com/UiPath/libgit2sharp.nativebinaries/releases/download/deps-openssl-3.6.3_libssh2-1.11.1/deps-linux-arm64.tar.gz",
+      "sha256": "d68a043811afaaa14c825513c62a0931c6aaa33aa24bba995745ba7e20deee50"
+    },
+    "osx-x64": {
+      "filename": "deps-osx-x64.tar.gz",
+      "url": "https://github.com/UiPath/libgit2sharp.nativebinaries/releases/download/deps-openssl-3.6.3_libssh2-1.11.1/deps-osx-x64.tar.gz",
+      "sha256": "e7dc8c70f811b737d3df9537919983e67777fa75c5aa9fcd770f5bedb6c1aeb6"
+    },
+    "osx-arm64": {
+      "filename": "deps-osx-arm64.tar.gz",
+      "url": "https://github.com/UiPath/libgit2sharp.nativebinaries/releases/download/deps-openssl-3.6.3_libssh2-1.11.1/deps-osx-arm64.tar.gz",
+      "sha256": "ddbbd3aea50df4c11cb55573f00a88192f5f7af9e8830b9ec0fcc240209ab387"
+    }
+  }
+}

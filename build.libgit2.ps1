@@ -12,6 +12,7 @@
 Param(
     [string]$vs = '16 2019',
     [string]$libgit2Name = '',
+    [string]$Platform = 'win-x64',
     [switch]$test,
     [switch]$debug
 )
@@ -20,10 +21,17 @@ Set-StrictMode -Version Latest
 
 $projectDirectory = Split-Path $MyInvocation.MyCommand.Path
 $libgit2Directory = Join-Path $projectDirectory "libgit2"
-$libssh2Directory = ([System.Uri](Join-Path $projectDirectory "libssh2")).AbsolutePath 
-$x86Directory = Join-Path $projectDirectory "nuget.package\runtimes\win-x86\native"
-$x64Directory = Join-Path $projectDirectory "nuget.package\runtimes\win-x64\native"
+
+# $Platform is a RID (win-x64 / win-arm64); derive the cmake target arch and packaging locations.
+$arch = ($Platform -split '-')[-1]                                  # x64 | arm64
+$cmakeArch = if ($arch -eq 'arm64') { 'ARM64' } else { 'x64' }     # cmake -A value
+# OpenSSL's runtime DLL carries an arch suffix: libcrypto-3-x64.dll / libcrypto-3-arm64.dll.
+$opensslDllSuffix = "-$arch"
+$nativeDirectory = Join-Path $projectDirectory "nuget.package\runtimes\$Platform\native"
 $hashFile = Join-Path $projectDirectory "nuget.package\libgit2\libgit2_hash.txt"
+# Prebuilt OpenSSL + libssh2, fetched & SHA256-verified by fetch.deps.ps1 (we no longer build them here).
+# Use forward slashes: these paths are passed to cmake, which treats backslashes as escape sequences.
+$depsDirectory = (Join-Path $projectDirectory "deps\$Platform").Replace('\', '/')
 
 if (![string]::IsNullOrEmpty($libgit2Name)) {
     $binaryFilename = $libgit2Name
@@ -36,8 +44,6 @@ if ($test.IsPresent) { $build_clar = 'ON' }
 
 $configuration = "RelWithDebInfo"
 if ($debug.IsPresent) { $configuration = "Debug" }
-
-$libopensslDirectory = [IO.Path]::Combine($projectDirectory, "openssl", "build", $configuration)
 
 function Run-Command([scriptblock]$Command, [switch]$Fatal, [switch]$Quiet) {
     $output = ""
@@ -94,32 +100,12 @@ function Ensure-Property($expected, $propertyValue, $propertyName, $path) {
     throw "Error: Invalid '$propertyName' property in generated '$path' (Expected: $expected - Actual: $propertyValue)"
 }
 
-function Build-LibSsh($generator, $platform, $buildDir) {
-	
-    cd $projectDirectory
-	cmd.exe /c build.openssl.cmd $configuration $platform
-	
-	Run-Command -Quiet { & remove-item $buildDir -recurse -force }
-	[IO.Directory]::CreateDirectory($buildDir)
-	cd $buildDir
-	Write-Output "CONFIGURE LIBSSH2 $generator -A $platform $configuration..."
-	Run-Command -Quiet -Fatal { & $cmake -G $generator -A $platform -D "CMAKE_BUILD_TYPE=$configuration" -D ENABLE_TRACE=ON -D "BUILD_CLAR=$build_clar" -D "OPENSSL_ROOT_DIR=$libopensslDirectory/$platform" -D "CRYPTO_BACKEND=OpenSSL" -D "BUILD_SHARED_LIBS=1" -D "BUILD_TESTING=OFF" -D "BUILD_EXAMPLES=OFF" $libssh2Directory }
-	Write-Output "BUILD LIBSSH2..."
-	Run-Command -Quiet -Fatal { & $cmake --build . --config $configuration }
-}
-
-function Build-LibGit($generator, $platform, $nugetDir, $useSchannel, $useSshExe, $buildPlatform) {
-	$libsshBuildDir = "$libssh2Directory/build/$platform"
-	$libsshBinDir = "$libsshBuildDir/src/$configuration"
-	$libopensslBinDir = "$libopensslDirectory/$platform/bin"
+function Build-LibGit($generator, $platform, $nugetDir, $useSchannel, $useSshExe) {
+	$depsBinDir = Join-Path $depsDirectory "bin"
 	$sshMethod = "libssh2"
 	if ($useSshExe) {
 		$sshMethod = "exec"
 	}
-    if ($buildPlatform) {
-        Write-Output "Building $platform..."
-        Build-LibSsh $generator $platform $libsshBuildDir
-    }
 
 	$buildDir = [IO.Path]::Combine( $libgit2Directory, "build", $platform)
 	Run-Command -Quiet { & remove-item $buildDir -recurse -force }
@@ -137,7 +123,7 @@ function Build-LibGit($generator, $platform, $nugetDir, $useSchannel, $useSshExe
     if ($useSchannel) {
         $httpsConfig = "-D `"USE_HTTPS=Schannel`""
     }
-	Run-Command -Fatal { & $cmake -G $generator -A $platform -D ENABLE_TRACE=ON -D "BUILD_CLAR=$build_clar" -D "BUILD_TESTS=OFF" -D "BUILD_CLI=OFF" $httpsConfig -D "LIBGIT2_FILENAME=$variantFilename" -D "USE_SSH=$sshMethod" -D "USE_BUNDLED_ZLIB=ON" -D "LIBSSH2_INCLUDE_DIRS=$libssh2Directory/include" -D "LIBSSH2_LIBRARIES=$libsshBinDir/libssh2.lib" -D "LIBSSH2_FOUND=TRUE" -D "OPENSSL_ROOT_DIR=$libopensslDirectory/$platform" $libgit2Directory }
+	Run-Command -Fatal { & $cmake -G $generator -A $platform -D ENABLE_TRACE=ON -D "BUILD_CLAR=$build_clar" -D "BUILD_TESTS=OFF" -D "BUILD_CLI=OFF" $httpsConfig -D "LIBGIT2_FILENAME=$variantFilename" -D "USE_SSH=$sshMethod" -D "USE_BUNDLED_ZLIB=ON" -D "LIBSSH2_INCLUDE_DIRS=$depsDirectory/include" -D "LIBSSH2_LIBRARIES=$depsDirectory/lib/libssh2.lib" -D "LIBSSH2_FOUND=TRUE" -D "OPENSSL_ROOT_DIR=$depsDirectory" $libgit2Directory }
 	Write-Output "BUILD LIBGIT..."
 	Run-Command -Quiet -Fatal { & $cmake --build . --config $configuration }
     if ($test.IsPresent) { Run-Command -Quiet -Fatal { & $ctest -V . } }
@@ -152,12 +138,8 @@ function Build-LibGit($generator, $platform, $nugetDir, $useSchannel, $useSshExe
     Run-Command -Quiet { & mkdir -fo $nugetDir }
     Run-Command -Quiet -Fatal { & copy -fo * $nugetDir -Exclude *.lib }
 	
-	$opensslPlatformPostfix = ""
-	if ($platform -eq "x64") {
-		$opensslPlatformPostfix = "-x64"
-	}
-	Copy-Item $libsshBinDir/libssh2.dll -Destination $nugetDir -Force
-	Copy-Item $libopensslBinDir/libcrypto-3$opensslPlatformPostfix.dll -Destination $nugetDir -Force
+	Copy-Item "$depsBinDir/libssh2.dll" -Destination $nugetDir -Force
+	Copy-Item "$depsBinDir/libcrypto-3$opensslDllSuffix.dll" -Destination $nugetDir -Force
 }
 
 function Assert-Consistent-Naming($expected, $path) {
@@ -173,12 +155,15 @@ try {
 
     $cmake = Find-CMake
     $ctest = Join-Path (Split-Path -Parent $cmake) "ctest.exe"
-	
-	Build-LibGit "Visual Studio $vs" "x64" $x64Directory $false $false $true
-	Build-LibGit "Visual Studio $vs" "x64" $x64Directory $true $false $false
-	Build-LibGit "Visual Studio $vs" "x64" $x64Directory $false $true $false	
-	Build-LibGit "Visual Studio $vs" "x64" $x64Directory $true $true $false
-	
+
+    # Fetch & hash-verify prebuilt OpenSSL + libssh2 (replaces compiling them from the submodules here).
+    & (Join-Path $projectDirectory "fetch.deps.ps1") -Platform $Platform
+
+	Build-LibGit "Visual Studio $vs" $cmakeArch $nativeDirectory $false $false
+	Build-LibGit "Visual Studio $vs" $cmakeArch $nativeDirectory $true $false
+	Build-LibGit "Visual Studio $vs" $cmakeArch $nativeDirectory $false $true
+	Build-LibGit "Visual Studio $vs" $cmakeArch $nativeDirectory $true $true
+
     Write-Output "Done!"
 }
 finally {

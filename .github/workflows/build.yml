@@ -1,0 +1,224 @@
+name: build
+
+# Builds libgit2 from the submodule against the prebuilt OpenSSL + libssh2 deps (fetched and
+# SHA256-verified from deps.lock.json - no OpenSSL/libssh2 compilation here) and assembles the
+# multi-RID native payload into a single archive (natives-<version>.zip + SHA256). The managed
+# LibGit2Sharp repo consumes this archive directly (no separate NativeBinaries nupkg); on develop
+# (or workflow_dispatch with publish=true) the archive is published as a durable GitHub Release.
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Publish the native archive as a GitHub Release (PR builds produce an artifact only)'
+        type: boolean
+        default: false
+  # Auto-publish a fresh natives Release when native-affecting changes land on develop (the release
+  # gate below opens on refs/heads/develop). Only develop — feature-branch pushes never trigger.
+  push:
+    branches:
+      - develop
+    paths:
+      - libgit2
+      - build.libgit2.ps1
+      - build.libgit2.sh
+      - buildpackage.ps1
+      - fetch.deps.ps1
+      - deps.lock.json
+      - nuget.package/**
+      - .github/workflows/build.yml
+  # Validate on PRs that touch the native build (artifact only; publishing stays gated on develop /
+  # workflow_dispatch publish=true).
+  pull_request:
+    paths:
+      - libgit2
+      - build.libgit2.ps1
+      - build.libgit2.sh
+      - buildpackage.ps1
+      - fetch.deps.ps1
+      - deps.lock.json
+      - nuget.package/**
+      - .github/workflows/build.yml
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Windows legs. Pin windows-2022 so the "Visual Studio 17 2022" cmake generator matches the
+          # runner's VS (windows-latest has moved past VS 2022); the arm64 leg builds natively on the
+          # windows-11-arm runner.
+          - platform: win-x64
+            os: windows-2022
+            vs: "17 2022"
+          - platform: win-arm64
+            os: windows-11-arm
+            vs: "17 2022"
+          # posix legs: build.libgit2.sh links the static deps into a single liblibgit2.{so,dylib}.
+          # osx-x64 cross-compiles on Apple Silicon (Intel runners are retired); arm64 legs are native.
+          - platform: linux-x64
+            os: ubuntu-latest
+          - platform: linux-arm64
+            os: ubuntu-24.04-arm
+          - platform: osx-x64
+            os: macos-14
+          - platform: osx-arm64
+            os: macos-14
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Checkout libgit2 submodule (deploy key over SSH)
+        shell: bash
+        env:
+          DEPLOY_KEY: ${{ secrets.LIBGIT2_DEPLOY_KEY }}
+        run: |
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$DEPLOY_KEY" > "$HOME/.ssh/libgit2_deploy"
+          chmod 600 "$HOME/.ssh/libgit2_deploy"
+          export GIT_SSH_COMMAND="ssh -i $HOME/.ssh/libgit2_deploy -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
+          # Scoped SSH rewrite so .gitmodules stays HTTPS (local devs unaffected); only the internal
+          # libgit2 repo is cloned via the deploy key.
+          git config --global url."git@github.com:UiPath/libgit2.git".insteadOf "https://github.com/UiPath/libgit2.git"
+          git submodule update --init libgit2
+
+      - name: Build libgit2 (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          # build.libgit2.ps1 is written for the default 'Continue' preference (its critical steps
+          # use Run-Command -Fatal, which Throws and still fails the job); GitHub's pwsh shell forces
+          # 'Stop', which would abort on the script's best-effort cleanup Remove-Item calls.
+          $ErrorActionPreference = 'Continue'
+          ./build.libgit2.ps1 -vs '${{ matrix.vs }}' -Platform '${{ matrix.platform }}'
+          if ($LASTEXITCODE) { throw "build.libgit2.ps1 failed ($LASTEXITCODE)" }
+
+      - name: Build libgit2 (posix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          chmod +x ./build.libgit2.sh
+          ./build.libgit2.sh '${{ matrix.platform }}'
+
+      # Each leg uploads only its own RID's native binaries; the pack job assembles them into one
+      # multi-RID NuGet.
+      - name: Upload native binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-${{ matrix.platform }}
+          path: nuget.package/runtimes/${{ matrix.platform }}/native/*
+          if-no-files-found: error
+
+  package:
+    needs: build
+    runs-on: windows-2022
+    permissions:
+      contents: write   # publish the native archive as a GitHub Release (when the flag / develop gate opens)
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # MinVer needs full history + tags to compute the version
+
+      - name: Download all native binaries
+        uses: actions/download-artifact@v4
+        with:
+          pattern: native-*
+          path: _natives
+
+      - name: Assemble runtimes tree
+        shell: bash
+        # download-artifact drops each artifact under _natives/native-<rid>/; place each RID's files
+        # back at nuget.package/runtimes/<rid>/native/ so the archive carries the full multi-RID tree.
+        run: |
+          for d in _natives/native-*; do
+            rid="${d#_natives/native-}"
+            mkdir -p "nuget.package/runtimes/$rid/native"
+            cp -rv "$d"/* "nuget.package/runtimes/$rid/native/"
+          done
+          echo "=== assembled runtimes tree ==="
+          find nuget.package/runtimes -type f | sort
+
+      - name: Resolve version (MinVer)
+        id: ver
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          dotnet tool install --global minver-cli --version 4.3.0 *> $null
+          $env:PATH += ";$env:USERPROFILE\.dotnet\tools"
+          # Empty tag prefix + preview.0 identifiers: same MinVer scheme as the managed LibGit2Sharp
+          # repo, so both are driven by the same X.Y.Z-vN base tags (e.g. a "1.9.1-v5" tag).
+          $raw = (minver --default-pre-release-identifiers preview.0).Trim()
+          if ($LASTEXITCODE) { throw "minver failed ($LASTEXITCODE)" }
+          # Version strings carry no build metadata in the archive/tag name; drop anything after '+'.
+          $raw = $raw.Split('+')[0]
+          # Collapse MinVer's "<base>-<epoch>.<height>" (e.g. 1.9.1-v5.21) into a single
+          # auto-incrementing "<base>-v<height>" (e.g. 1.9.1-v21), matching the managed repo's
+          # AdjustVersions target. The epoch tag is only a permanent counting anchor: v<height> rises
+          # monotonically per commit, so no manual version tagging is needed. NEVER cut another -vN tag
+          # on the line, or the height (hence v<N>) resets and the version would regress.
+          $parts = $raw -split '-', 2
+          $base = $parts[0]
+          $height = if (($parts.Count -gt 1) -and ($parts[1] -match '\.(\d+)$')) { $Matches[1] } else { '0' }
+          $version = "$base-v$height"
+          Write-Host "Resolved version: $version (from MinVer '$raw')"
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Assemble native archive
+        id: zip
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = '${{ steps.ver.outputs.version }}'
+          $staging = Join-Path $env:RUNNER_TEMP 'natives'
+          if (Test-Path $staging) { Remove-Item $staging -Recurse -Force }
+          # The archive carries the full package payload (runtimes + build props + libgit2 metadata),
+          # so the managed LibGit2Sharp repo can lay it straight into its own package. Drop the nuspec
+          # (this repo's nuget-pack metadata) and any .pdb.
+          Copy-Item nuget.package $staging -Recurse
+          Remove-Item (Join-Path $staging 'NativeBinaries.nuspec') -Force -ErrorAction SilentlyContinue
+          Get-ChildItem $staging -Recurse -Filter *.pdb | Remove-Item -Force
+          $zip = "natives-$version.zip"
+          if (Test-Path $zip) { Remove-Item $zip -Force }
+          Compress-Archive -Path (Join-Path $staging '*') -DestinationPath $zip
+          $sha = (Get-FileHash -Algorithm SHA256 -Path $zip).Hash.ToLower()
+          "$sha  $zip" | Out-File -FilePath "$zip.sha256" -Encoding ascii
+          Write-Host "Built $zip"
+          Write-Host "SHA256: $sha"
+          "zip=$zip"      | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "sha256=$sha"   | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "tag=natives-$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Upload native archive artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: natives
+          path: |
+            ${{ steps.zip.outputs.zip }}
+            ${{ steps.zip.outputs.zip }}.sha256
+          if-no-files-found: error
+
+      - name: Publish to GitHub Release
+        # Flag-gated: a durable release is published only when explicitly requested (workflow_dispatch
+        # publish=true) or on develop. PR/branch runs produce the workflow artifact above and nothing
+        # more, so they never mint stray releases.
+        if: ${{ inputs.publish || github.ref == 'refs/heads/develop' }}
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $PSNativeCommandUseErrorActionPreference = $false
+          $tag = '${{ steps.zip.outputs.tag }}'
+          $zip = '${{ steps.zip.outputs.zip }}'
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag --title $tag --notes "Prebuilt LibGit2Sharp native binaries (all RIDs). Consumed directly by the managed LibGit2Sharp package via natives.lock.json; SHA256 sidecar accompanies the archive."
+          }
+          gh release upload $tag $zip "$zip.sha256" --clobber
+          if ($LASTEXITCODE -ne 0) { throw "gh release upload failed ($LASTEXITCODE)" }
+          Write-Host "Published $zip to release $tag (SHA256 ${{ steps.zip.outputs.sha256 }})"

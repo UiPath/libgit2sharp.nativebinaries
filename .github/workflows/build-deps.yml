@@ -1,0 +1,119 @@
+name: build-deps
+
+# Builds the prebuilt native dependencies (OpenSSL + libssh2) with vcpkg and publishes a
+# per-platform archive (+ SHA256) as a GitHub Release asset. The main libgit2 build fetches and
+# verifies these against deps.lock.json, so it never has to compile OpenSSL/libssh2 itself.
+#
+# Run manually after bumping the openssl/libssh2 submodules (and deps/vcpkg.json to match).
+on:
+  # Manual only. workflow_dispatch needs this file on the default branch (develop) to be
+  # dispatchable from the Actions UI. Run after bumping the openssl/libssh2 submodules and
+  # deps/vcpkg.json, then copy the printed SHA256 into deps.lock.json. Deliberately NOT triggered on
+  # push: a rebuild would republish the release archives with fresh (non-reproducible) SHA256s and
+  # break the pinned deps.lock.json.
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Windows ships separate dynamic DLLs (loader finds co-located deps). Linux/macOS link the
+          # deps statically into a single libgit2 shared lib, so those triplets are static+PIC via
+          # our overlays in deps/triplets (which shadow the stock triplet names). arm64 legs build
+          # natively on GitHub's arm runners.
+          - platform: win-x64
+            os: windows-latest
+            triplet: x64-windows
+          - platform: win-arm64
+            os: windows-11-arm
+            triplet: arm64-windows
+          - platform: linux-x64
+            os: ubuntu-latest
+            triplet: x64-linux
+          - platform: linux-arm64
+            os: ubuntu-24.04-arm
+            triplet: arm64-linux
+          # Cross-compiled on Apple Silicon (see deps/triplets/x64-osx.cmake): macos-13 Intel
+          # runners are scarce/slow and being retired.
+          - platform: osx-x64
+            os: macos-14
+            triplet: x64-osx
+          - platform: osx-arm64
+            os: macos-14
+            triplet: arm64-osx
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Init deps submodules (openssl + libssh2 only)
+        shell: bash
+        # Only these two are needed to pin/verify versions; the libgit2 submodule is not required
+        # here (and may be private), so avoid `submodules: recursive`.
+        run: git submodule update --init --depth 1 openssl libssh2
+
+      - name: Ensure vcpkg
+        shell: pwsh
+        # windows-latest/ubuntu-latest ship vcpkg preinstalled (VCPKG_INSTALLATION_ROOT), but the
+        # newer arm runners (and some images) do not. Clone + bootstrap our own when it's missing so
+        # every leg is self-sufficient. build.deps.ps1 then fetches the pinned baseline as needed.
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $false
+          $isWin = $IsWindows -or ($null -eq $IsWindows)
+          $exe = if ($isWin) { 'vcpkg.exe' } else { 'vcpkg' }
+          $root = $env:VCPKG_INSTALLATION_ROOT
+          if ($root -and (Test-Path (Join-Path $root $exe))) {
+            Write-Host "Using preinstalled vcpkg at $root"
+          } else {
+            $root = Join-Path $env:RUNNER_TEMP 'vcpkg'
+            Write-Host "No preinstalled vcpkg found; cloning to $root"
+            # Blobless clone keeps full commit history (so the pinned baseline is reachable) without
+            # downloading every blob.
+            git clone --filter=blob:none https://github.com/microsoft/vcpkg $root
+            if ($LASTEXITCODE) { throw "vcpkg clone failed ($LASTEXITCODE)." }
+            $bootstrap = Join-Path $root ($isWin ? 'bootstrap-vcpkg.bat' : 'bootstrap-vcpkg.sh')
+            & $bootstrap -disableMetrics
+            if ($LASTEXITCODE) { throw "vcpkg bootstrap failed ($LASTEXITCODE)." }
+          }
+          "VCPKG_ROOT=$root" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Build dependencies with vcpkg
+        id: build
+        shell: pwsh
+        run: ./build.deps.ps1 -Triplet '${{ matrix.triplet }}' -Platform '${{ matrix.platform }}'
+
+      - name: Upload archive as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: deps-${{ matrix.platform }}
+          path: |
+            ${{ steps.build.outputs.archive }}
+            ${{ steps.build.outputs.archive }}.sha256
+
+      - name: Publish to GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Drive on $LASTEXITCODE, not auto-throw: 6 matrix legs publish concurrently, so `view`
+          # 404s and the losing `create` race are expected and must not fail the job.
+          $ErrorActionPreference = 'Continue'
+          $PSNativeCommandUseErrorActionPreference = $false
+          $tag = '${{ steps.build.outputs.tag }}'
+          $archive = '${{ steps.build.outputs.archive }}'
+          # Create the release once; ignore failure if a concurrent matrix leg already created it.
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag --title $tag --notes "Prebuilt OpenSSL + libssh2 native dependencies. SHA256 sidecar files accompany each archive."
+          }
+          gh release upload $tag $archive "$archive.sha256" --clobber
+          if ($LASTEXITCODE -ne 0) { throw "gh release upload failed ($LASTEXITCODE)" }
+          Write-Host "Published $archive to release $tag with SHA256 ${{ steps.build.outputs.sha256 }}"
