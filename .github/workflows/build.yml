@@ -9,13 +9,12 @@ on:
   workflow_dispatch:
     inputs:
       publish:
-        description: 'Publish the native archive as a GitHub Release (auto-true on develop)'
+        description: 'Publish the native archive as a GitHub Release (PR builds produce an artifact only)'
         type: boolean
         default: false
-  # Temporary push trigger while this workflow lives only on a feature branch. Remove once merged.
-  push:
-    branches:
-      - feature/ab/pipeline_iter_1
+  # Validate on PRs that touch the native build; never on a bare push. Publishing a durable release
+  # is a deliberate act (workflow_dispatch with publish=true), so PR runs upload the artifact only.
+  pull_request:
     paths:
       - libgit2
       - build.libgit2.ps1
