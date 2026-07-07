@@ -156,15 +156,16 @@ jobs:
           if ($LASTEXITCODE) { throw "minver failed ($LASTEXITCODE)" }
           # Version strings carry no build metadata in the archive/tag name; drop anything after '+'.
           $raw = $raw.Split('+')[0]
-          # Collapse MinVer's "<base>-<epoch>.<height>" (e.g. 1.9.1-v5.21) into a single
-          # auto-incrementing "<base>-v<height>" (e.g. 1.9.1-v21), matching the managed repo's
-          # AdjustVersions target. The epoch tag is only a permanent counting anchor: v<height> rises
-          # monotonically per commit, so no manual version tagging is needed. NEVER cut another -vN tag
-          # on the line, or the height (hence v<N>) resets and the version would regress.
+          # Turn MinVer's "<base>-v<epoch>.<height>" (base tag 1.9.1-v5 at height 1 -> 1.9.1-v5.1)
+          # into a single continuing "<base>-v<epoch+height>" (e.g. 1.9.1-v6), matching the managed
+          # repo's AdjustVersions target. The base tag sets the epoch and each commit past it
+          # increments the number; on the tag itself height is 0 so the number equals the tag.
           $parts = $raw -split '-', 2
           $base = $parts[0]
-          $height = if (($parts.Count -gt 1) -and ($parts[1] -match '\.(\d+)$')) { $Matches[1] } else { '0' }
-          $version = "$base-v$height"
+          $pre = if ($parts.Count -gt 1) { $parts[1] } else { '' }
+          $epoch = if ($pre -match '^v(\d+)') { [int]$Matches[1] } else { 0 }
+          $height = if ($pre -match '\.(\d+)$') { [int]$Matches[1] } else { 0 }
+          $version = "$base-v$($epoch + $height)"
           Write-Host "Resolved version: $version (from MinVer '$raw')"
           "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
