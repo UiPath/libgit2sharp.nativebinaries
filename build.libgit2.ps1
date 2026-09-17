@@ -119,11 +119,12 @@ function Build-LibGit($generator, $platform, $nugetDir, $useSchannel, $useSshExe
         $variantFilename = -join ($variantFilename, "_ssh")
     }
 	Write-Output "CONFIGURE LIBGIT... Schannel: $useSchannel"
-    $httpsConfig = "WinHTTP"
+    $httpsBackend = "WinHTTP"
     if ($useSchannel) {
-        $httpsConfig = "-D `"USE_HTTPS=Schannel`""
+        $httpsBackend = "Schannel"
     }
-	Run-Command -Fatal { & $cmake -G $generator -A $platform -D ENABLE_TRACE=ON -D "BUILD_CLAR=$build_clar" -D "BUILD_TESTS=OFF" -D "BUILD_CLI=OFF" $httpsConfig -D "LIBGIT2_FILENAME=$variantFilename" -D "USE_SSH=$sshMethod" -D "USE_BUNDLED_ZLIB=ON" -D "LIBSSH2_INCLUDE_DIRS=$depsDirectory/include" -D "LIBSSH2_LIBRARIES=$depsDirectory/lib/libssh2.lib" -D "LIBSSH2_FOUND=TRUE" -D "OPENSSL_ROOT_DIR=$depsDirectory" $libgit2Directory }
+    $httpsArgs = @("-D", "USE_HTTPS=$httpsBackend")
+	Run-Command -Fatal { & $cmake -G $generator -A $platform -D ENABLE_TRACE=ON -D "BUILD_CLAR=$build_clar" -D "BUILD_TESTS=OFF" -D "BUILD_CLI=OFF" @httpsArgs -D "LIBGIT2_FILENAME=$variantFilename" -D "USE_SSH=$sshMethod" -D "USE_BUNDLED_ZLIB=ON" -D "LIBSSH2_INCLUDE_DIRS=$depsDirectory/include" -D "LIBSSH2_LIBRARIES=$depsDirectory/lib/libssh2.lib" -D "LIBSSH2_FOUND=TRUE" -D "OPENSSL_ROOT_DIR=$depsDirectory" $libgit2Directory }
 	Write-Output "BUILD LIBGIT..."
 	Run-Command -Quiet -Fatal { & $cmake --build . --config $configuration }
     if ($test.IsPresent) { Run-Command -Quiet -Fatal { & $ctest -V . } }
@@ -132,6 +133,7 @@ function Build-LibGit($generator, $platform, $nugetDir, $useSchannel, $useSshExe
 <#
     Assert-Consistent-Naming "$binaryFilename.dll" "*.dll"
 #>
+    Assert-HttpsBackend (Join-Path (Get-Location) "$variantFilename.dll") $useSchannel
 
     Run-Command -Quiet { & rm *.exp }
     Run-Command -Quiet { & rm $nugetDir\* }
@@ -140,6 +142,76 @@ function Build-LibGit($generator, $platform, $nugetDir, $useSchannel, $useSshExe
 	
 	Copy-Item "$depsBinDir/libssh2.dll" -Destination $nugetDir -Force
 	Copy-Item "$depsBinDir/libcrypto-3$opensslDllSuffix.dll" -Destination $nugetDir -Force
+}
+
+function Get-PeImportedDlls([string]$Path) {
+    $bytes = [IO.File]::ReadAllBytes($Path)
+
+    $peOffset = [BitConverter]::ToInt32($bytes, 0x3C)
+    if ([BitConverter]::ToUInt32($bytes, $peOffset) -ne 0x00004550) {
+        throw "'$Path' is not a PE image"
+    }
+
+    $fileHeader = $peOffset + 4
+    $numSections = [BitConverter]::ToUInt16($bytes, $fileHeader + 2)
+    $optHeaderSize = [BitConverter]::ToUInt16($bytes, $fileHeader + 16)
+    $optHeader = $fileHeader + 20
+
+    $magic = [BitConverter]::ToUInt16($bytes, $optHeader)
+    $dataDirectories = if ($magic -eq 0x20B) { $optHeader + 112 } else { $optHeader + 96 }
+    $importRva = [BitConverter]::ToUInt32($bytes, $dataDirectories + 8)
+    if ($importRva -eq 0) {
+        return @()
+    }
+
+    $sectionTable = $optHeader + $optHeaderSize
+    $sections = @(for ($i = 0; $i -lt $numSections; $i++) {
+        $s = $sectionTable + $i * 40
+        [pscustomobject]@{
+            VirtualSize    = [BitConverter]::ToUInt32($bytes, $s + 8)
+            VirtualAddress = [BitConverter]::ToUInt32($bytes, $s + 12)
+            RawSize        = [BitConverter]::ToUInt32($bytes, $s + 16)
+            RawPointer     = [BitConverter]::ToUInt32($bytes, $s + 20)
+        }
+    })
+
+    $rvaToOffset = {
+        param([uint32]$rva)
+        foreach ($section in $sections) {
+            $size = [Math]::Max($section.VirtualSize, $section.RawSize)
+            if ($rva -ge $section.VirtualAddress -and $rva -lt ($section.VirtualAddress + $size)) {
+                return [int]($rva - $section.VirtualAddress + $section.RawPointer)
+            }
+        }
+        throw "RVA 0x$($rva.ToString('X')) is not mapped by any section of '$Path'"
+    }
+
+    $readCString = {
+        param([int]$offset)
+        $end = [Array]::IndexOf($bytes, [byte]0, $offset)
+        [Text.Encoding]::ASCII.GetString($bytes, $offset, $end - $offset)
+    }
+
+    $names = @()
+    $descriptor = & $rvaToOffset $importRva
+    while ($true) {
+        $nameRva = [BitConverter]::ToUInt32($bytes, $descriptor + 12)
+        if ($nameRva -eq 0) { break }
+        $names += & $readCString (& $rvaToOffset $nameRva)
+        $descriptor += 20
+    }
+    $names
+}
+
+function Assert-HttpsBackend([string]$dllPath, [bool]$useSchannel) {
+    $imports = @(Get-PeImportedDlls $dllPath)
+    $importsWinHttp = [bool]($imports | Where-Object { $_ -ieq "winhttp.dll" })
+    $expected = if ($useSchannel) { "Schannel" } else { "WinHTTP" }
+    $actual = if ($importsWinHttp) { "WinHTTP" } else { "Schannel" }
+    if ($actual -ne $expected) {
+        throw "Error: '$dllPath' was built with the $actual HTTPS backend, expected $expected. Imports: $($imports -join ', ')"
+    }
+    Write-Output "VERIFIED $(Split-Path -Leaf $dllPath) uses the $expected HTTPS backend"
 }
 
 function Assert-Consistent-Naming($expected, $path) {
