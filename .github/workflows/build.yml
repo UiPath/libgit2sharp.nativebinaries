@@ -48,15 +48,15 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Windows legs. Pin windows-2022 so the "Visual Studio 17 2022" cmake generator matches the
-          # runner's VS (windows-latest has moved past VS 2022); the arm64 leg builds natively on the
-          # windows-11-arm runner.
+          # Windows legs. Pin each runner to an image whose VS matches the cmake generator:
+          # windows-2022 for "Visual Studio 17 2022" (windows-latest has moved past VS 2022), and
+          # windows-11-vs2026-arm for the native arm64 leg (windows-11-arm now serves a VS 2026-only image).
           - platform: win-x64
             os: windows-2022
             vs: "17 2022"
           - platform: win-arm64
-            os: windows-11-arm
-            vs: "17 2022"
+            os: windows-11-vs2026-arm
+            vs: "18 2026"
           # posix legs: build.libgit2.sh links the static deps into a single liblibgit2.{so,dylib}.
           # osx-x64 cross-compiles on Apple Silicon (Intel runners are retired); arm64 legs are native.
           - platform: linux-x64
