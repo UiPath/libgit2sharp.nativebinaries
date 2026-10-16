@@ -103,23 +103,25 @@ if ($LASTEXITCODE -ne 0) {
 # (versions/*.json), not against the baseline commit; the baseline only pins default versions. A
 # preinstalled vcpkg checkout that is older than the baseline therefore fails with
 # "no version database entry for openssl at X.Y.Z" even after the baseline commit has been fetched
-# (seen on the macos-14 and ubuntu-24.04-arm runners). The images' checkouts also carry local edits,
-# so they cannot simply be moved forward. When the checkout is behind the baseline, clone a private
-# vcpkg at the baseline instead and use that for this build; the preinstalled one is left untouched.
+# (seen on the macos-14 and ubuntu-24.04-arm runners). The images' checkouts carry local edits, so
+# they cannot simply be moved forward, and a fresh blobless clone from GitHub fails because the git
+# that vcpkg spawns to check out port trees has no network. So: make a local clone that SHARES the
+# preinstalled repo's object store (which holds every port tree after the fetch above), check the
+# baseline out there, bootstrap, and use it for this build. The preinstalled checkout is untouched.
 & git -C $VcpkgRoot merge-base --is-ancestor $baseline HEAD 2>$null
 if ($LASTEXITCODE -ne 0) {
     $privateRoot = Join-Path ($(if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { [IO.Path]::GetTempPath() })) 'vcpkg-baseline'
-    Write-Host "vcpkg checkout at $VcpkgRoot is behind baseline $baseline; cloning a private vcpkg at the baseline into $privateRoot..."
+    Write-Host "vcpkg checkout at $VcpkgRoot is behind baseline $baseline; making a shared local clone at the baseline in $privateRoot..."
     if (Test-Path $privateRoot) { Remove-Item $privateRoot -Recurse -Force }
-    # Blobless clone keeps the full commit history (so the baseline is reachable) without every blob.
-    & git clone --quiet --filter=blob:none https://github.com/microsoft/vcpkg $privateRoot
-    if ($LASTEXITCODE -ne 0) { throw "vcpkg clone failed ($LASTEXITCODE)." }
+    & git clone --quiet --shared --no-checkout $VcpkgRoot $privateRoot
+    if ($LASTEXITCODE -ne 0) { throw "local vcpkg clone failed ($LASTEXITCODE)." }
     & git -C $privateRoot -c advice.detachedHead=false checkout --quiet --detach $baseline
     if ($LASTEXITCODE -ne 0) { throw "Could not check out vcpkg baseline $baseline in '$privateRoot'." }
     $bootstrap = Join-Path $privateRoot $(if ($isWindowsHost) { 'bootstrap-vcpkg.bat' } else { 'bootstrap-vcpkg.sh' })
     & $bootstrap -disableMetrics
     if ($LASTEXITCODE -ne 0) { throw "vcpkg bootstrap failed ($LASTEXITCODE) at baseline $baseline." }
     $VcpkgRoot = $privateRoot
+    $env:VCPKG_ROOT = $privateRoot   # silence the "ignoring mismatched VCPKG_ROOT" warning
     $vcpkg = Join-Path $VcpkgRoot $(if ($isWindowsHost) { 'vcpkg.exe' } else { 'vcpkg' })
     if (-not (Test-Path $vcpkg)) { throw "vcpkg executable not found under '$VcpkgRoot' after bootstrap." }
 }
