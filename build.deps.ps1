@@ -123,7 +123,6 @@ if ($LASTEXITCODE -ne 0) {
     $vcpkg = Join-Path $VcpkgRoot $(if ($isWindowsHost) { 'vcpkg.exe' } else { 'vcpkg' })
     if (-not (Test-Path $vcpkg)) { throw "vcpkg executable not found under '$VcpkgRoot' after bootstrap." }
 }
-}
 
 # --- Build --------------------------------------------------------------------
 Write-Host "==> vcpkg install (triplet=$Triplet) from $manifestPath"
