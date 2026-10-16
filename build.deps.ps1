@@ -99,6 +99,22 @@ if ($LASTEXITCODE -ne 0) {
     if ($LASTEXITCODE -ne 0) { throw "vcpkg baseline commit $baseline is not reachable from origin." }
 }
 
+# vcpkg resolves manifest `overrides` against the versions database in the WORKING TREE of $VcpkgRoot
+# (versions/*.json), not against the baseline commit; the baseline only pins default versions. A
+# preinstalled vcpkg checkout that is older than the baseline therefore fails with
+# "no version database entry for openssl at X.Y.Z" even after the baseline commit has been fetched
+# (seen on the macos-14 and ubuntu-24.04-arm runners). Move the checkout forward to the baseline when
+# it is behind it, and re-bootstrap so the vcpkg tool matches the checkout.
+& git -C $VcpkgRoot merge-base --is-ancestor $baseline HEAD 2>$null
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "vcpkg checkout at $VcpkgRoot is behind baseline $baseline; checking out the baseline..."
+    & git -C $VcpkgRoot -c advice.detachedHead=false checkout --quiet --detach $baseline
+    if ($LASTEXITCODE -ne 0) { throw "Could not check out vcpkg baseline $baseline in '$VcpkgRoot'." }
+    $bootstrap = Join-Path $VcpkgRoot $(if ($isWindowsHost) { 'bootstrap-vcpkg.bat' } else { 'bootstrap-vcpkg.sh' })
+    & $bootstrap -disableMetrics
+    if ($LASTEXITCODE -ne 0) { throw "vcpkg bootstrap failed ($LASTEXITCODE) after checking out baseline $baseline." }
+}
+
 # --- Build --------------------------------------------------------------------
 Write-Host "==> vcpkg install (triplet=$Triplet) from $manifestPath"
 & $vcpkg install `
